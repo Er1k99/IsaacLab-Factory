@@ -1,0 +1,18 @@
+[package]
+version = "0.1.0"
+title = "IsaacLab Factory Tasks"
+description = "Standalone IsaacLab-style task package for the Factory PegInsert direct environment."
+readme = "README.md"
+repository = "local"
+category = "robotics"
+keywords = ["robotics", "rl", "isaaclab", "factory", "peg_insert"]
+
+[dependencies]
+"isaaclab" = {}
+"isaaclab_assets" = {}
+
+[core]
+reloadable = false
+
+[[python.module]]
+name = "isaaclab_factory_tasks"

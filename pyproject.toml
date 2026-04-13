@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel", "toml"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "isaaclab-factory-tasks"
+version = "0.1.0"
+description = "Refactored standalone IsaacLab Factory PegInsert direct task."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "gymnasium",
+    "hydra-core",
+    "numpy<2",
+    "prettytable",
+    "PyYAML",
+    "torch>=2.7",
+]
+
+[tool.setuptools]
+package-dir = {"" = "source"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["source"]
+
+[tool.setuptools.package-data]
+"isaaclab_factory_tasks.direct.peg_insert.agents" = ["*.yaml"]
