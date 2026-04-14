@@ -64,6 +64,12 @@ import isaaclab_factory_tasks  # noqa: F401
 --task Isaac-Factory-PegInsert-Refactored-Direct-v0
 ```
 
+当前仓库还额外提供了一个只学习抓取的基线任务：
+
+```bash
+--task Isaac-Factory-PegPick-Direct-v0
+```
+
 ## 训练
 
 推荐直接使用 IsaacLab 的启动器运行当前仓库里的脚本：
@@ -71,12 +77,30 @@ import isaaclab_factory_tasks  # noqa: F401
 ```bash
 ~/Isaaclab2.3.2/isaaclab.sh -p /home/eric/IsaacLab-Factory/scripts/reinforcement_learning/rl_games/train.py \
   --task Isaac-Factory-PegInsert-Direct-v0 \
+  --track \
+  --wandb-entity <your_entity> \
   --headless
 ```
 
 这些脚本会自动把当前仓库 `source/` 和常见的本地 IsaacLab 源码目录
 `~/Isaaclab2.3.2/source/{isaaclab,isaaclab_rl,isaaclab_assets}` 加入 `sys.path`，
 所以即使你还没有把这些源码包单独 `pip install -e`，通常也可以直接运行。
+
+当前训练脚本的保存与日志逻辑是：
+
+- 训练日志默认写到当前仓库下的 `logs/rl_games/FactoryPegInsert/<timestamp>/`
+- Hydra 默认输出目录也固定在当前仓库下的 `outputs/`
+- wandb 的本地运行目录、缓存和 artifact 暂存也固定在当前仓库下的 `wandb/`
+- 每次运行都会自动附带时间戳，避免覆盖旧日志和旧模型
+- `params/env.yaml` 和 `params/agent.yaml` 会自动保存到对应实验目录
+- RL-Games 会每 `50` 个 epoch 做一次周期性保存
+- 训练结束后，如果启用了 `--track`，会自动把 `nn/` 下的最佳和最新 checkpoint 上传到 wandb artifact
+
+如果只想记录 wandb 标量，不上传模型，可以额外传：
+
+```bash
+--wandb-upload-model False
+```
 
 如果只想快速看环境是否注册成功：
 
@@ -91,3 +115,32 @@ import isaaclab_factory_tasks  # noqa: F401
   --task Isaac-Factory-PegInsert-Direct-v0 \
   --use_last_checkpoint
 ```
+
+插销训练命令：
+```bash
+~/Isaaclab2.3.2/isaaclab.sh -p /home/eric/IsaacLab-Factory/scripts/reinforcement_learning/rl_games/train.py   --task Isaac-Factory-PegInsert-Direct-v0   --track   --wandb-entity jiadapeng4-sasfs   --headless
+```
+
+插销play命令：
+~/Isaaclab2.3.2/isaaclab.sh -p /home/eric/IsaacLab-Factory/scripts/reinforcement_learning/rl_games/play.py \
+  --task Isaac-Factory-PegInsert-Refactored-Direct-v0 \
+  --checkpoint /home/eric/IsaacLab-Factory/last_Factory_ep_200_rew_370.69455.pth \
+  --num_envs 1
+
+
+
+抓取训练命令：
+~/Isaaclab2.3.2/isaaclab.sh -p /home/eric/IsaacLab-Factory/scripts/reinforcement_learning/rl_games/train.py \
+  --task Isaac-Factory-PegPick-Direct-v0 \
+  --track \
+  --wandb-entity jiadapeng4-sasfs \
+  --headless
+
+抓取play命令：
+~/Isaaclab2.3.2/isaaclab.sh -p /home/eric/IsaacLab-Factory/scripts/reinforcement_learning/rl_games/play.py \
+  --task Isaac-Factory-PegPick-Direct-v0 \
+  --checkpoint /home/eric/IsaacLab-Factory/logs/rl_games/FactoryPegPick/2026-04-14_22-08-08/nn/last_FactoryPegPick_ep_200_rew_128.242.pth \
+  --num_envs 1
+
+
+/home/eric/IsaacLab-Factory/logs/rl_games/FactoryPegPick/2026-04-14_18-03-47/nn/last_FactoryPegPick_ep_50_rew_74.41704.pth

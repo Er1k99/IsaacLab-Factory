@@ -22,6 +22,7 @@ except ImportError:
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_ROOT = REPO_ROOT / "source"
+WANDB_ROOT = REPO_ROOT / "wandb"
 
 
 def _bootstrap_pythonpath() -> None:
@@ -80,6 +81,14 @@ parser.add_argument("--wandb-project-name", type=str, default=None, help="Weight
 parser.add_argument("--wandb-entity", type=str, default=None, help="Weights and Biases entity.")
 parser.add_argument("--wandb-name", type=str, default=None, help="Weights and Biases run name.")
 parser.add_argument(
+    "--wandb-upload-model",
+    type=lambda x: bool(strtobool(x)),
+    default=True,
+    nargs="?",
+    const=True,
+    help="Upload the best and latest checkpoints to Weights and Biases as a model artifact.",
+)
+parser.add_argument(
     "--track",
     type=lambda x: bool(strtobool(x)),
     default=False,
@@ -123,6 +132,85 @@ from isaaclab_factory_tasks.utils.hydra import hydra_task_config
 logger = logging.getLogger(__name__)
 
 
+def _resolve_log_dir(config_name: str, configured_name: str | None) -> str:
+    """Resolve a timestamped experiment directory to avoid overwriting previous runs."""
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if configured_name is None:
+        return timestamp
+
+    configured_name = str(configured_name).strip()
+    if configured_name == "" or configured_name.lower() in {"test", "default", "auto"}:
+        return timestamp
+
+    return f"{configured_name}_{timestamp}"
+
+
+def _upload_wandb_checkpoints(wandb_run, run_dir: Path, config_name: str) -> None:
+    """Upload the best and latest RL-Games checkpoints to Weights & Biases."""
+    import wandb
+
+    nn_dir = run_dir / "nn"
+    if not nn_dir.is_dir():
+        logger.warning("Skipping Weights & Biases model upload because checkpoint directory does not exist: %s", nn_dir)
+        return
+
+    checkpoint_paths = sorted(nn_dir.glob("*.pth"), key=lambda path: path.stat().st_mtime)
+    if len(checkpoint_paths) == 0:
+        logger.warning("Skipping Weights & Biases model upload because no checkpoints were found in: %s", nn_dir)
+        return
+
+    best_checkpoint = nn_dir / f"{config_name}.pth"
+    if not best_checkpoint.is_file():
+        best_checkpoint = checkpoint_paths[-1]
+
+    latest_checkpoint = checkpoint_paths[-1]
+
+    artifact = wandb.Artifact(
+        name=f"{config_name}-{wandb_run.id}-checkpoints",
+        type="model",
+        metadata={
+            "config_name": config_name,
+            "run_dir": str(run_dir),
+            "best_checkpoint": best_checkpoint.name,
+            "latest_checkpoint": latest_checkpoint.name,
+            "checkpoint_count": len(checkpoint_paths),
+        },
+    )
+    artifact.add_file(str(best_checkpoint), name=f"nn/{best_checkpoint.name}")
+    if latest_checkpoint != best_checkpoint:
+        artifact.add_file(str(latest_checkpoint), name=f"nn/{latest_checkpoint.name}")
+
+    params_dir = run_dir / "params"
+    if params_dir.is_dir():
+        for cfg_path in sorted(params_dir.glob("*.yaml")):
+            artifact.add_file(str(cfg_path), name=f"params/{cfg_path.name}")
+
+    wandb_run.log_artifact(artifact, aliases=["latest", "best"])
+    wandb_run.summary["best_checkpoint"] = str(best_checkpoint)
+    wandb_run.summary["latest_checkpoint"] = str(latest_checkpoint)
+    wandb_run.summary["checkpoint_count"] = len(checkpoint_paths)
+
+
+def _prepare_wandb_dirs() -> Path:
+    """Pin all local Weights & Biases files to the repository."""
+    run_dir = WANDB_ROOT / "runs"
+    cache_dir = WANDB_ROOT / ".cache"
+    artifact_dir = WANDB_ROOT / "artifacts"
+    data_dir = WANDB_ROOT / "data"
+    config_dir = WANDB_ROOT / "config"
+
+    for path in (run_dir, cache_dir, artifact_dir, data_dir, config_dir):
+        path.mkdir(parents=True, exist_ok=True)
+
+    os.environ["WANDB_DIR"] = str(run_dir)
+    os.environ["WANDB_CACHE_DIR"] = str(cache_dir)
+    os.environ["WANDB_ARTIFACT_DIR"] = str(artifact_dir)
+    os.environ["WANDB_DATA_DIR"] = str(data_dir)
+    os.environ["WANDB_CONFIG_DIR"] = str(config_dir)
+
+    return run_dir
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict) -> None:
     """Train an RL-Games agent."""
@@ -158,8 +246,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.seed = agent_cfg["params"]["seed"]
 
     config_name = agent_cfg["params"]["config"]["name"]
-    log_root_path = os.path.abspath(os.path.join("logs", "rl_games", config_name))
-    log_dir = agent_cfg["params"]["config"].get("full_experiment_name", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    log_root_path = str((REPO_ROOT / "logs" / "rl_games" / config_name).resolve())
+    log_dir = _resolve_log_dir(config_name, agent_cfg["params"]["config"].get("full_experiment_name"))
     agent_cfg["params"]["config"]["train_dir"] = log_root_path
     agent_cfg["params"]["config"]["full_experiment_name"] = log_dir
 
@@ -218,27 +306,35 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     runner.reset()
 
     global_rank = int(os.getenv("RANK", "0"))
+    wandb_run = None
     if args_cli.track and global_rank == 0:
         if args_cli.wandb_entity is None:
             raise ValueError("Weights and Biases entity must be specified for tracking.")
+        wandb_run_dir = _prepare_wandb_dirs()
         import wandb
 
-        wandb.init(
+        wandb_run = wandb.init(
             project=wandb_project,
             entity=args_cli.wandb_entity,
             name=experiment_name,
+            dir=str(wandb_run_dir),
             sync_tensorboard=True,
             monitor_gym=True,
             save_code=True,
         )
         if not wandb.run.resumed:
-            wandb.config.update({"env_cfg": env_cfg.to_dict()})
-            wandb.config.update({"agent_cfg": agent_cfg})
+            wandb_run.config.update({"env_cfg": env_cfg.to_dict()})
+            wandb_run.config.update({"agent_cfg": agent_cfg})
 
     if args_cli.checkpoint is not None:
         runner.run({"train": True, "play": False, "sigma": train_sigma, "checkpoint": resume_path})
     else:
         runner.run({"train": True, "play": False, "sigma": train_sigma})
+
+    if wandb_run is not None:
+        if args_cli.wandb_upload_model:
+            _upload_wandb_checkpoints(wandb_run, Path(env_cfg.log_dir), config_name)
+        wandb_run.finish()
 
     print(f"Training time: {round(time.time() - start_time, 2)} seconds")
     env.close()

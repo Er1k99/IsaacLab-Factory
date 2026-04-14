@@ -6,4 +6,5 @@ __pycache__/
 .codex
 logs/
 outputs/
+wandb/
 videos/

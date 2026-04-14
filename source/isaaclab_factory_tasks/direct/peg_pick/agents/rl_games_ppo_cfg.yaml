@@ -50,7 +50,7 @@ params:
   load_path: ""
 
   config:
-    name: FactoryPegInsert
+    name: FactoryPegPick
     device: cuda:0
     full_experiment_name: ""
     env_name: rlgpu
@@ -72,7 +72,7 @@ params:
     kl_threshold: 0.008
     score_to_win: 20000
     max_epochs: 200
-    save_best_after: 10
+    save_best_after: 50
     save_frequency: 50
     print_stats: True
     grad_norm: 1.0

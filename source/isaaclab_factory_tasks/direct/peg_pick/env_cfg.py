@@ -3,55 +3,49 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Environment configuration for the refactored PegInsert task."""
+"""Environment configuration for the refactored PegPick task."""
 
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
-from isaaclab.assets import ArticulationCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import PhysxCfg, SimulationCfg
 from isaaclab.sim.spawners.materials.physics_materials_cfg import RigidBodyMaterialCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-from .task_cfg import ASSET_DIR, PegInsertTaskCfg
+from .task_cfg import ASSET_DIR, PegPickTaskCfg
 
 OBS_DIM_CFG = {
-    "fingertip_pos": 3,
-    "fingertip_pos_rel_fixed": 3,
+    "fingertip_pos_rel_grasp": 3,
     "fingertip_quat": 4,
     "ee_linvel": 3,
     "ee_angvel": 3,
+    "gripper_opening": 1,
 }
 
 STATE_DIM_CFG = {
     "fingertip_pos": 3,
-    "fingertip_pos_rel_fixed": 3,
     "fingertip_quat": 4,
     "ee_linvel": 3,
     "ee_angvel": 3,
     "joint_pos": 7,
     "held_pos": 3,
-    "held_pos_rel_fixed": 3,
     "held_quat": 4,
-    "fixed_pos": 3,
-    "fixed_quat": 4,
-    "task_prop_gains": 6,
-    "pos_threshold": 3,
-    "rot_threshold": 3,
+    "grasp_target_pos": 3,
+    "gripper_opening": 1,
 }
 
-
-@configclass
-class ObsRandCfg:
-    fixed_asset_pos: list[float] = [0.001, 0.001, 0.001]
+SCENE_TASK_CFG = PegPickTaskCfg()
 
 
 @configclass
 class CtrlCfg:
     ema_factor: float = 0.2
 
-    pos_action_bounds: list[float] = [0.05, 0.05, 0.05]
+    pos_action_bounds: list[float] = [0.05, 0.05, 0.08]
     rot_action_bounds: list[float] = [1.0, 1.0, 1.0]
 
     pos_action_threshold: list[float] = [0.02, 0.02, 0.02]
@@ -68,58 +62,11 @@ class CtrlCfg:
 
 
 @configclass
-class PegInsertEnvCfg(DirectRLEnvCfg):
-    decimation = 8
-    action_space = 6
-    observation_space = 21
-    state_space = 72
-
-    obs_order: list[str] = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
-    state_order: list[str] = [
-        "fingertip_pos",
-        "fingertip_quat",
-        "ee_linvel",
-        "ee_angvel",
-        "joint_pos",
-        "held_pos",
-        "held_pos_rel_fixed",
-        "held_quat",
-        "fixed_pos",
-        "fixed_quat",
-    ]
-
-    task: PegInsertTaskCfg = PegInsertTaskCfg()
-    obs_rand: ObsRandCfg = ObsRandCfg()
-    ctrl: CtrlCfg = CtrlCfg()
-    episode_length_s = 10.0
-
-    sim: SimulationCfg = SimulationCfg(
-        device="cuda:0",
-        dt=1 / 120,
-        gravity=(0.0, 0.0, -9.81),
-        physx=PhysxCfg(
-            solver_type=1,
-            max_position_iteration_count=192,
-            max_velocity_iteration_count=1,
-            bounce_threshold_velocity=0.2,
-            friction_offset_threshold=0.01,
-            friction_correlation_distance=0.00625,
-            # Keep PhysX GPU buffers modest so the task can start on workstation GPUs.
-            gpu_max_rigid_contact_count=2**20,
-            gpu_max_rigid_patch_count=2**20,
-            gpu_collision_stack_size=2**26,
-            gpu_max_num_partitions=1,
-        ),
-        physics_material=RigidBodyMaterialCfg(
-            static_friction=1.0,
-            dynamic_friction=1.0,
-        ),
-    )
-
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=128, env_spacing=2.0, clone_in_fabric=True)
+class PegPickSceneCfg(InteractiveSceneCfg):
+    """Scene configuration for PegPick with scene-managed contact sensors."""
 
     robot = ArticulationCfg(
-        prim_path="/World/envs/env_.*/Robot",
+        prim_path="{ENV_REGEX_NS}/Robot",
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{ASSET_DIR}/franka_mimic.usd",
             activate_contact_sensors=True,
@@ -186,3 +133,90 @@ class PegInsertEnvCfg(DirectRLEnvCfg):
             ),
         },
     )
+
+    fixed_asset = SCENE_TASK_CFG.fixed_asset.replace(prim_path="{ENV_REGEX_NS}/FixedAsset")
+    held_asset = SCENE_TASK_CFG.held_asset.replace(prim_path="{ENV_REGEX_NS}/HeldAsset")
+
+    table = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Table",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=(0.55, 0.0, 0.0),
+            rot=(0.70711, 0.0, 0.0, 0.70711),
+        ),
+    )
+
+    left_finger_contact = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/panda_leftfinger",
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/HeldAsset/.*"],
+        update_period=0.0,
+        history_length=0,
+        debug_vis=False,
+    )
+    right_finger_contact = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/panda_rightfinger",
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/HeldAsset/.*"],
+        update_period=0.0,
+        history_length=0,
+        debug_vis=False,
+    )
+
+
+@configclass
+class PegPickEnvCfg(DirectRLEnvCfg):
+    decimation = 8
+    action_space = 7
+    observation_space = 1
+    state_space = 1
+
+    obs_order: list[str] = [
+        "fingertip_pos_rel_grasp",
+        "fingertip_quat",
+        "ee_linvel",
+        "ee_angvel",
+        "gripper_opening",
+    ]
+    state_order: list[str] = [
+        "fingertip_pos",
+        "fingertip_quat",
+        "ee_linvel",
+        "ee_angvel",
+        "joint_pos",
+        "held_pos",
+        "held_quat",
+        "grasp_target_pos",
+        "gripper_opening",
+    ]
+
+    task: PegPickTaskCfg = PegPickTaskCfg()
+    ctrl: CtrlCfg = CtrlCfg()
+    episode_length_s = 8.0
+
+    sim: SimulationCfg = SimulationCfg(
+        device="cuda:0",
+        dt=1 / 120,
+        gravity=(0.0, 0.0, -9.81),
+        physx=PhysxCfg(
+            solver_type=1,
+            max_position_iteration_count=192,
+            max_velocity_iteration_count=1,
+            bounce_threshold_velocity=0.2,
+            friction_offset_threshold=0.01,
+            friction_correlation_distance=0.00625,
+            # Keep PhysX GPU buffers modest so the task can start on workstation GPUs.
+            gpu_max_rigid_contact_count=2**20,
+            gpu_max_rigid_patch_count=2**20,
+            gpu_collision_stack_size=2**26,
+            gpu_max_num_partitions=1,
+        ),
+        physics_material=RigidBodyMaterialCfg(
+            static_friction=1.0,
+            dynamic_friction=1.0,
+        ),
+    )
+
+    # ContactSensor initialization counts environments via USD stage queries. Fabric cloning only exposes the
+    # source env reliably to those queries, which breaks the sensor's body-count validation on cloned envs.
+    scene: PegPickSceneCfg = PegPickSceneCfg(num_envs=128, env_spacing=2.0, clone_in_fabric=False)

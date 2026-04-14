@@ -6,7 +6,9 @@
 """Hydra utilities aligned with the IsaacLab task package workflow."""
 
 import functools
+import sys
 from collections.abc import Callable
+from pathlib import Path
 
 try:
     import hydra
@@ -20,6 +22,11 @@ from isaaclab.envs.utils.spaces import replace_env_cfg_spaces_with_strings, repl
 from isaaclab.utils import replace_slices_with_strings, replace_strings_with_slices
 
 from .parse_cfg import load_cfg_from_registry
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+HYDRA_OUTPUT_ROOT = REPO_ROOT / "outputs"
+HYDRA_RUN_DIR = f"{HYDRA_OUTPUT_ROOT.as_posix()}/${{now:%Y-%m-%d}}/${{now:%H-%M-%S}}"
+HYDRA_SWEEP_DIR = f"{(HYDRA_OUTPUT_ROOT / 'multirun').as_posix()}/${{now:%Y-%m-%d}}/${{now:%H-%M-%S}}"
 
 
 def register_task_to_hydra(
@@ -38,6 +45,16 @@ def register_task_to_hydra(
     cfg_dict = replace_slices_with_strings(cfg_dict)
     ConfigStore.instance().store(name=task_name, node=cfg_dict)
     return env_cfg, agent_cfg
+
+
+def _inject_repo_output_overrides(argv: list[str]) -> list[str]:
+    """Ensure Hydra outputs are stored under this repository unless explicitly overridden."""
+    overrides = list(argv)
+    if not any(arg.startswith("hydra.run.dir=") for arg in overrides):
+        overrides.append(f"hydra.run.dir={HYDRA_RUN_DIR}")
+    if not any(arg.startswith("hydra.sweep.dir=") for arg in overrides):
+        overrides.append(f"hydra.sweep.dir={HYDRA_SWEEP_DIR}")
+    return overrides
 
 
 def hydra_task_config(task_name: str, agent_cfg_entry_point: str) -> Callable:
@@ -64,7 +81,12 @@ def hydra_task_config(task_name: str, agent_cfg_entry_point: str) -> Callable:
 
                 func(env_cfg, resolved_agent_cfg, *args, **kwargs)
 
-            hydra_main()
+            original_argv = sys.argv[:]
+            try:
+                sys.argv = _inject_repo_output_overrides(sys.argv)
+                hydra_main()
+            finally:
+                sys.argv = original_argv
 
         return wrapper
 

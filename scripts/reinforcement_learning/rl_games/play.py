@@ -119,7 +119,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg["params"]["seed"] = args_cli.seed if args_cli.seed is not None else agent_cfg["params"]["seed"]
     env_cfg.seed = agent_cfg["params"]["seed"]
 
-    log_root_path = os.path.abspath(os.path.join("logs", "rl_games", agent_cfg["params"]["config"]["name"]))
+    log_root_path = str((REPO_ROOT / "logs" / "rl_games" / agent_cfg["params"]["config"]["name"]).resolve())
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
 
     if args_cli.checkpoint is None:
