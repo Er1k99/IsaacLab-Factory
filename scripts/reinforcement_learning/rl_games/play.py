@@ -72,6 +72,18 @@ parser.add_argument(
     help="When no checkpoint is provided, use the last saved checkpoint instead of the default best model.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real time if possible.")
+parser.add_argument(
+    "--print_peg_metrics",
+    action="store_true",
+    default=False,
+    help="Print peg height and lift height during play when the environment exposes them.",
+)
+parser.add_argument(
+    "--print_interval",
+    type=int,
+    default=10,
+    help="Print peg metrics every N play steps when --print_peg_metrics is enabled.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 if args_cli.video:
@@ -103,6 +115,19 @@ from isaaclab_rl.rl_games import RlGamesGpuEnv, RlGamesVecEnvWrapper
 import isaaclab_factory_tasks  # noqa: F401
 from isaaclab_factory_tasks.utils import get_checkpoint_path
 from isaaclab_factory_tasks.utils.hydra import hydra_task_config
+
+
+def _print_peg_metrics(prefix: str, env) -> None:
+    """Print peg z-height diagnostics for tasks that expose peg state."""
+    if not hasattr(env, "held_pos") or not hasattr(env, "task_cfg"):
+        return
+
+    peg_height = env.held_pos[:, 2].detach().cpu()
+    lift_height = torch.clamp(env.held_pos[:, 2] - env.task_cfg.table_height, min=0.0).detach().cpu()
+    print(
+        f"{prefix} | peg_height={peg_height[0].item():.4f} | lift_height={lift_height[0].item():.4f}",
+        flush=True,
+    )
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -143,6 +168,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
 
+    base_env = env.unwrapped
+
     if args_cli.video:
         video_kwargs = {
             "video_folder": os.path.join(log_dir, "videos", "play"),
@@ -178,6 +205,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         obs = obs["obs"]
 
     timestep = 0
+    play_step = 0
     _ = agent.get_batch_size(obs, 1)
     if agent.is_rnn:
         agent.init_rnn()
@@ -188,10 +216,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             obs = agent.obs_to_torch(obs)
             actions = agent.get_action(obs, is_deterministic=agent.is_deterministic)
             obs, _, dones, _ = env.step(actions)
+            play_step += 1
 
             if len(dones) > 0 and agent.is_rnn and agent.states is not None:
                 for state in agent.states:
                     state[:, dones, :] = 0.0
+
+        if args_cli.print_peg_metrics and (play_step % max(args_cli.print_interval, 1) == 0):
+            _print_peg_metrics(f"play_step={play_step}", base_env)
 
         if args_cli.video:
             timestep += 1

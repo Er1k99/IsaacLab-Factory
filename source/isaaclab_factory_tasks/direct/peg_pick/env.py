@@ -63,6 +63,7 @@ class PegPickEnv(DirectRLEnv):
 
         self.grasp_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
         self.gripper_opening = torch.zeros((self.num_envs, 1), device=self.device)
+        self.prev_lift_height = torch.zeros((self.num_envs,), device=self.device)
 
         self.success_hold_buf = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
         self.ep_succeeded = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
@@ -434,6 +435,7 @@ class PegPickEnv(DirectRLEnv):
 
         self.prev_actions = self.actions.clone()
         self._log_metrics(rew_dict, curr_successes, reach_dist, lift_height, grasp_contact_state)
+        self.prev_lift_height = lift_height.clone()
         return rew_buf
 
     def _get_reward_terms(
@@ -455,6 +457,12 @@ class PegPickEnv(DirectRLEnv):
         grasp_candidate = grasp_contact_state["valid_grasp"]
 
         lift_progress = torch.clamp(lift_height / self.task_cfg.lift_target_height, min=0.0, max=1.0)
+        lift_step_height = torch.clamp(lift_height - self.prev_lift_height, min=0.0)
+        lift_step_progress = torch.clamp(
+            lift_step_height / self.task_cfg.lift_step_target_height,
+            min=0.0,
+            max=1.0,
+        )
 
         action_penalty_ee = torch.norm(self.actions, p=2, dim=-1)
         action_grad_penalty = torch.norm(self.actions - self.prev_actions, p=2, dim=-1)
@@ -463,7 +471,8 @@ class PegPickEnv(DirectRLEnv):
             "reach": reach_reward,
             "close": close_reward,
             "grasp": grasp_candidate.float(),
-            "lift": grasp_candidate.float() * lift_progress,
+            "lift": grasp_candidate.float()
+            * (lift_progress + self.task_cfg.lift_step_bonus_weight * lift_step_progress),
             "action_penalty_ee": action_penalty_ee,
             "action_grad_penalty": action_grad_penalty,
             "curr_success": curr_successes.float(),
@@ -705,6 +714,7 @@ class PegPickEnv(DirectRLEnv):
         self.prev_joint_pos = self.joint_pos[:, 0:7].clone()
         self.prev_fingertip_pos = self.fingertip_midpoint_pos.clone()
         self.prev_fingertip_quat = self.fingertip_midpoint_quat.clone()
+        self.prev_lift_height = torch.clamp(self.held_pos[:, 2] - self.task_cfg.table_height, min=0.0)
 
         self.actions = torch.zeros_like(self.actions)
         self.prev_actions = torch.zeros_like(self.actions)

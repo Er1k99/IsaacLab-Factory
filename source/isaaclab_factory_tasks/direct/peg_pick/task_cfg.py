@@ -23,7 +23,7 @@ class PegPickTaskCfg:
 
     # Match the holder/table working height used by the Factory peg assets so reset placement,
     # lift metrics, and drop checks all use the same z reference.
-    table_height: float = 0.05
+    table_height: float = 0.0
     fixed_asset_init_pos: list[float] = [0.55, 0.0, 0.05]
     fixed_asset_init_pos_noise: list[float] = [0.08, 0.08, 0.0]
     fixed_asset_init_orn_deg: float = 0.0
@@ -53,7 +53,9 @@ class PegPickTaskCfg:
     gripper_closed_threshold: float = 0.004
     grasp_contact_force_threshold: float = 0.5
     grasp_contact_angle_threshold_deg: float = 110.0
-    lift_target_height: float = 0.10
+    lift_target_height: float = 0.05
+    lift_step_target_height: float = 0.005
+    lift_step_bonus_weight: float = 0.5
     lift_success_height: float = 0.05
     success_reach_threshold: float = 0.03
     success_hold_steps: int = 5
