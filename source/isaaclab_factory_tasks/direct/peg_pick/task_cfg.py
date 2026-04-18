@@ -42,9 +42,9 @@ class PegPickTaskCfg:
     action_grad_penalty_scale: float = 0.0
     reach_reward_coef: list[float] = [25, 2]
     reach_reward_scale: float = 1.0
-    close_reward_scale: float = 0.5
-    grasp_reward_scale: float = 1.0
-    lift_reward_scale: float = 2.0
+    close_reward_scale: float = 0.1
+    grasp_reward_scale: float = 0.5
+    lift_reward_scale: float = 3.0
     success_reward_scale: float = 3.0
 
     close_reward_radius: float = 0.02

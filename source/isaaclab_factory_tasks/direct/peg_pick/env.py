@@ -63,7 +63,6 @@ class PegPickEnv(DirectRLEnv):
 
         self.grasp_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
         self.gripper_opening = torch.zeros((self.num_envs, 1), device=self.device)
-        self.prev_grasp_candidate = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
 
         self.success_hold_buf = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
         self.ep_succeeded = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
@@ -197,7 +196,6 @@ class PegPickEnv(DirectRLEnv):
         self.success_hold_buf[env_ids] = 0
         self.ep_succeeded[env_ids] = 0
         self.ep_success_times[env_ids] = 0
-        self.prev_grasp_candidate[env_ids] = False
 
     def _pre_physics_step(self, action: torch.Tensor) -> None:
         """Apply EMA smoothing to policy actions."""
@@ -434,7 +432,6 @@ class PegPickEnv(DirectRLEnv):
         for rew_name, rew in rew_dict.items():
             rew_buf += rew * rew_scales[rew_name]
 
-        self.prev_grasp_candidate = grasp_contact_state["valid_grasp"].clone()
         self.prev_actions = self.actions.clone()
         self._log_metrics(rew_dict, curr_successes, reach_dist, lift_height, grasp_contact_state)
         return rew_buf
@@ -456,7 +453,6 @@ class PegPickEnv(DirectRLEnv):
         close_reward = near_grasp.float() * (1.0 - gripper_open_frac)
 
         grasp_candidate = grasp_contact_state["valid_grasp"]
-        first_grasp = torch.logical_and(grasp_candidate, torch.logical_not(self.prev_grasp_candidate))
 
         lift_progress = torch.clamp(lift_height / self.task_cfg.lift_target_height, min=0.0, max=1.0)
 
@@ -466,7 +462,7 @@ class PegPickEnv(DirectRLEnv):
         rew_dict = {
             "reach": reach_reward,
             "close": close_reward,
-            "grasp": first_grasp.float(),
+            "grasp": grasp_candidate.float(),
             "lift": grasp_candidate.float() * lift_progress,
             "action_penalty_ee": action_penalty_ee,
             "action_grad_penalty": action_grad_penalty,
