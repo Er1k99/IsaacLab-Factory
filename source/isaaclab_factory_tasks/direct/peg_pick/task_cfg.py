@@ -54,8 +54,6 @@ class PegPickTaskCfg:
     grasp_contact_force_threshold: float = 0.5
     grasp_contact_angle_threshold_deg: float = 110.0
     lift_target_height: float = 0.05
-    lift_step_target_height: float = 0.005
-    lift_step_bonus_weight: float = 0.5
     lift_success_height: float = 0.05
     success_reach_threshold: float = 0.03
     success_hold_steps: int = 5
