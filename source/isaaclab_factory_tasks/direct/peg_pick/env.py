@@ -63,6 +63,7 @@ class PegPickEnv(DirectRLEnv):
 
         self.grasp_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
         self.gripper_opening = torch.zeros((self.num_envs, 1), device=self.device)
+        self.initial_fingertip_midpoint_pos = torch.zeros((self.num_envs, 3), device=self.device)
 
         self.success_hold_buf = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
         self.ep_succeeded = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
@@ -391,6 +392,7 @@ class PegPickEnv(DirectRLEnv):
         curr_successes: torch.Tensor,
         reach_dist: torch.Tensor,
         lift_height: torch.Tensor,
+        return_dist: torch.Tensor,
         grasp_contact_state: dict[str, torch.Tensor],
     ) -> None:
         """Record success metrics and reward diagnostics."""
@@ -409,6 +411,7 @@ class PegPickEnv(DirectRLEnv):
 
         self.extras["reach_distance"] = reach_dist.mean()
         self.extras["lift_height"] = lift_height.mean()
+        self.extras["return_distance"] = return_dist.mean()
         self.extras["left_finger_contact_force"] = grasp_contact_state["left_force_norm"].mean()
         self.extras["right_finger_contact_force"] = grasp_contact_state["right_force_norm"].mean()
         self.extras["left_finger_net_contact_force"] = grasp_contact_state["left_net_force_norm"].mean()
@@ -426,35 +429,42 @@ class PegPickEnv(DirectRLEnv):
         """Compute reward and update episode statistics."""
         grasp_contact_state = self._get_grasp_contact_state()
         curr_successes = self._get_curr_successes(grasp_contact_state)
-        rew_dict, rew_scales, reach_dist, lift_height = self._get_reward_terms(curr_successes, grasp_contact_state)
+        rew_dict, rew_scales, reach_dist, lift_height, return_dist = self._get_reward_terms(
+            curr_successes,
+            grasp_contact_state,
+        )
 
         rew_buf = torch.zeros_like(rew_dict["reach"])
         for rew_name, rew in rew_dict.items():
             rew_buf += rew * rew_scales[rew_name]
 
         self.prev_actions = self.actions.clone()
-        self._log_metrics(rew_dict, curr_successes, reach_dist, lift_height, grasp_contact_state)
+        self._log_metrics(rew_dict, curr_successes, reach_dist, lift_height, return_dist, grasp_contact_state)
         return rew_buf
 
     def _get_reward_terms(
         self,
         curr_successes: torch.Tensor,
         grasp_contact_state: dict[str, torch.Tensor],
-    ) -> tuple[dict[str, torch.Tensor], dict[str, float], torch.Tensor, torch.Tensor]:
+    ) -> tuple[dict[str, torch.Tensor], dict[str, float], torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute reward terms for the current simulator state."""
         reach_dist = torch.linalg.vector_norm(self.fingertip_midpoint_pos - self.grasp_target_pos, dim=1)
         lift_height = torch.clamp(self.held_pos[:, 2] - self.task_cfg.table_height, min=0.0)
+        return_dist = torch.linalg.vector_norm(
+            self.fingertip_midpoint_pos - self.initial_fingertip_midpoint_pos,
+            dim=1,
+        )
 
         a0, b0 = self.task_cfg.reach_reward_coef
         reach_reward = peg_pick_utils.squashing_fn(reach_dist, a0, b0)
+        a1, b1 = self.task_cfg.return_reward_coef
+        return_reward = peg_pick_utils.squashing_fn(return_dist, a1, b1)
 
         near_grasp = reach_dist < self.task_cfg.close_reward_radius
         gripper_open_frac = torch.clamp(self.gripper_opening.squeeze(-1) / self.max_gripper_opening, min=0.0, max=1.0)
         close_reward = near_grasp.float() * (1.0 - gripper_open_frac)
 
         grasp_candidate = grasp_contact_state["valid_grasp"]
-
-        lift_progress = torch.clamp(lift_height / self.task_cfg.lift_target_height, min=0.0, max=1.0)
 
         action_penalty_ee = torch.norm(self.actions, p=2, dim=-1)
         action_grad_penalty = torch.norm(self.actions - self.prev_actions, p=2, dim=-1)
@@ -463,7 +473,7 @@ class PegPickEnv(DirectRLEnv):
             "reach": reach_reward,
             "close": close_reward,
             "grasp": grasp_candidate.float(),
-            "lift": grasp_candidate.float() * lift_progress,
+            "return": grasp_candidate.float() * return_reward,
             "action_penalty_ee": action_penalty_ee,
             "action_grad_penalty": action_grad_penalty,
             "curr_success": curr_successes.float(),
@@ -472,12 +482,12 @@ class PegPickEnv(DirectRLEnv):
             "reach": self.task_cfg.reach_reward_scale,
             "close": self.task_cfg.close_reward_scale,
             "grasp": self.task_cfg.grasp_reward_scale,
-            "lift": self.task_cfg.lift_reward_scale,
+            "return": self.task_cfg.return_reward_scale,
             "action_penalty_ee": -self.task_cfg.action_penalty_ee_scale,
             "action_grad_penalty": -self.task_cfg.action_grad_penalty_scale,
             "curr_success": self.task_cfg.success_reward_scale,
         }
-        return rew_dict, rew_scales, reach_dist, lift_height
+        return rew_dict, rew_scales, reach_dist, lift_height, return_dist
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Terminate on sustained success, drops below the table, or timeout."""
@@ -702,6 +712,7 @@ class PegPickEnv(DirectRLEnv):
             self.step_sim_no_action()
             open_time += self.sim.get_physics_dt()
 
+        self.initial_fingertip_midpoint_pos[env_ids] = self.fingertip_midpoint_pos[env_ids].clone()
         self.prev_joint_pos = self.joint_pos[:, 0:7].clone()
         self.prev_fingertip_pos = self.fingertip_midpoint_pos.clone()
         self.prev_fingertip_quat = self.fingertip_midpoint_quat.clone()

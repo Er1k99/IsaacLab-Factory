@@ -76,7 +76,7 @@ parser.add_argument(
     "--print_peg_metrics",
     action="store_true",
     default=False,
-    help="Print peg height and lift height during play when the environment exposes them.",
+    help="Print peg pose diagnostics during play, including grasp_target_pos when the environment exposes it.",
 )
 parser.add_argument(
     "--print_interval",
@@ -118,16 +118,46 @@ from isaaclab_factory_tasks.utils.hydra import hydra_task_config
 
 
 def _print_peg_metrics(prefix: str, env) -> None:
-    """Print peg z-height diagnostics for tasks that expose peg state."""
+    """Print peg pose diagnostics for tasks that expose peg state."""
     if not hasattr(env, "held_pos") or not hasattr(env, "task_cfg"):
         return
 
-    peg_height = env.held_pos[:, 2].detach().cpu()
-    lift_height = torch.clamp(env.held_pos[:, 2] - env.task_cfg.table_height, min=0.0).detach().cpu()
-    print(
-        f"{prefix} | peg_height={peg_height[0].item():.4f} | lift_height={lift_height[0].item():.4f}",
-        flush=True,
+    held_pos = env.held_pos[0].detach().cpu()
+    peg_height = held_pos[2].item()
+    lift_height = max(peg_height - env.task_cfg.table_height, 0.0)
+
+    prev_held_pos = getattr(_print_peg_metrics, "_prev_held_pos", None)
+    if prev_held_pos is None:
+        held_delta = torch.zeros_like(held_pos)
+    else:
+        held_delta = held_pos - prev_held_pos
+    _print_peg_metrics._prev_held_pos = held_pos.clone()
+
+    def _format_vec3(vec: torch.Tensor) -> str:
+        return f"({vec[0].item():.4f}, {vec[1].item():.4f}, {vec[2].item():.4f})"
+
+    message = (
+        f"{prefix} | held_pos={_format_vec3(held_pos)} | held_delta={_format_vec3(held_delta)}"
+        f" | peg_height={peg_height:.4f} | lift_height={lift_height:.4f}"
     )
+
+    if hasattr(env, "grasp_target_pos"):
+        grasp_target_pos = env.grasp_target_pos[0].detach().cpu()
+        prev_grasp_target_pos = getattr(_print_peg_metrics, "_prev_grasp_target_pos", None)
+        if prev_grasp_target_pos is None:
+            grasp_target_delta = torch.zeros_like(grasp_target_pos)
+        else:
+            grasp_target_delta = grasp_target_pos - prev_grasp_target_pos
+        _print_peg_metrics._prev_grasp_target_pos = grasp_target_pos.clone()
+
+        grasp_offset = grasp_target_pos - held_pos
+        message += (
+            f" | grasp_target_pos={_format_vec3(grasp_target_pos)}"
+            f" | grasp_target_delta={_format_vec3(grasp_target_delta)}"
+            f" | grasp_offset={_format_vec3(grasp_offset)}"
+        )
+
+    print(message, flush=True)
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
