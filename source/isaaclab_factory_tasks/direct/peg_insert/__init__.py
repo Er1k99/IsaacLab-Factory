@@ -3,27 +3,23 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Gym registration for the refactored Factory PegInsert task."""
+"""Gym registration for the local Factory PegInsert task."""
 
 import gymnasium as gym
 
 from . import agents
 
 
-def _register_env(task_id: str) -> None:
-    if task_id in gym.registry:
-        return
-
-    gym.register(
-        id=task_id,
-        entry_point=f"{__name__}.env:PegInsertEnv",
-        disable_env_checker=True,
-        kwargs={
-            "env_cfg_entry_point": f"{__name__}.env_cfg:PegInsertEnvCfg",
-            "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
-        },
-    )
-
-
-_register_env("Isaac-Factory-PegInsert-Direct-v0")
-_register_env("Isaac-Factory-PegInsert-Refactored-Direct-v0")
+gym.register(
+    id="Isaac-Factory-PegInsert-Local-Direct-v0",
+    entry_point=f"{__name__}.env:PegInsertEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.env_cfg:PegInsertEnvCfg",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_gru_cfg.yaml",
+        "rl_games_ppo_gru_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_gru_cfg.yaml",
+        "rl_games_ppo_lstm_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_lstm_cfg.yaml",
+        "rl_games_ppo_mlp_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_mlp_cfg.yaml",
+        "rl_games_sac_cfg_entry_point": f"{agents.__name__}:rl_games_sac_cfg.yaml",
+    },
+)

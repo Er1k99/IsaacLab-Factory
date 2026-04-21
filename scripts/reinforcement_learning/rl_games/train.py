@@ -15,6 +15,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 try:
     from distutils.util import strtobool
 except ImportError:
@@ -63,14 +65,27 @@ except ModuleNotFoundError as exc:
         "for example: <isaaclab_root>/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py"
     ) from exc
 
-parser = argparse.ArgumentParser(description="Train an RL agent with RL-Games.")
+parser = argparse.ArgumentParser(description="Train an RL-Games PPO or SAC agent.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video in steps.")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings.")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default="Isaac-Factory-PegInsert-Direct-v0", help="Name of the task.")
+parser.add_argument("--task", type=str, default="Isaac-Factory-PegInsert-Local-Direct-v0", help="Name of the task.")
 parser.add_argument(
-    "--agent", type=str, default="rl_games_cfg_entry_point", help="Registry key for the RL agent configuration."
+    "--agent",
+    type=str,
+    default=None,
+    help=(
+        "Registry key for the RL agent configuration. Defaults to None, in which case the argument "
+        "--algorithm is used to determine the default agent configuration entry point."
+    ),
+)
+parser.add_argument(
+    "--algorithm",
+    type=str,
+    default="PPO_GRU",
+    choices=["PPO", "PPO_GRU", "PPO_LSTM", "PPO_MLP", "SAC"],
+    help="RL-Games algorithm/network preset to train. 'PPO' is kept as a backward-compatible alias for 'PPO_GRU'.",
 )
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment.")
 parser.add_argument("--distributed", action="store_true", default=False, help="Run training with multiple GPUs.")
@@ -128,8 +143,111 @@ from isaaclab_rl.rl_games import MultiObserver, PbtAlgoObserver, RlGamesGpuEnv, 
 
 import isaaclab_factory_tasks  # noqa: F401
 from isaaclab_factory_tasks.utils.hydra import hydra_task_config
+from isaaclab_factory_tasks.utils.rl_games_sac import (
+    FactoryRlGamesVecEnvWrapper,
+    register_factory_rl_games_sac,
+    upgrade_factory_sac_agent_cfg,
+)
 
 logger = logging.getLogger(__name__)
+
+
+PPO_GRU = "PPO_GRU"
+PPO_LSTM = "PPO_LSTM"
+PPO_MLP = "PPO_MLP"
+SAC = "SAC"
+PPO_VARIANTS = {PPO_GRU, PPO_LSTM, PPO_MLP}
+
+
+def _normalize_rl_games_algorithm(algorithm_name: str | None) -> str | None:
+    if algorithm_name is None:
+        return None
+
+    normalized = str(algorithm_name).strip().lower().replace("-", "_")
+    if normalized in {"ppo", "ppo_gru"}:
+        return PPO_GRU
+    if normalized == "ppo_lstm":
+        return PPO_LSTM
+    if normalized == "ppo_mlp":
+        return PPO_MLP
+    if normalized == "sac":
+        return SAC
+    raise ValueError(
+        f"Unsupported RL-Games algorithm: '{algorithm_name}'. Expected one of: "
+        "PPO_GRU, PPO_LSTM, PPO_MLP, SAC."
+    )
+
+
+def _get_algorithm_family(algorithm_name: str) -> str:
+    algorithm_name = _normalize_rl_games_algorithm(algorithm_name)
+    if algorithm_name == SAC:
+        return SAC
+    if algorithm_name in PPO_VARIANTS:
+        return "PPO"
+    raise ValueError(f"Unsupported RL-Games algorithm family for '{algorithm_name}'.")
+
+
+def _resolve_default_agent_cfg_entry_point(algorithm_name: str) -> str:
+    algorithm_name = _normalize_rl_games_algorithm(algorithm_name)
+    entry_points = {
+        PPO_GRU: "rl_games_ppo_gru_cfg_entry_point",
+        PPO_LSTM: "rl_games_ppo_lstm_cfg_entry_point",
+        PPO_MLP: "rl_games_ppo_mlp_cfg_entry_point",
+        SAC: "rl_games_sac_cfg_entry_point",
+    }
+    return entry_points[algorithm_name]
+
+
+if args_cli.agent is None:
+    algorithm = _normalize_rl_games_algorithm(args_cli.algorithm)
+    agent_cfg_entry_point = _resolve_default_agent_cfg_entry_point(algorithm)
+else:
+    agent_cfg_entry_point = args_cli.agent
+    algorithm = None
+
+
+def _get_agent_cfg_recurrent_type(agent_cfg: dict) -> str | None:
+    rnn_cfg = agent_cfg.get("params", {}).get("network", {}).get("rnn")
+    if not isinstance(rnn_cfg, dict):
+        return None
+    recurrent_type = str(rnn_cfg.get("name", "")).strip().lower()
+    if recurrent_type not in {"gru", "lstm"}:
+        return None
+    return recurrent_type
+
+
+def _get_agent_cfg_algorithm(agent_cfg: dict) -> str:
+    algo_name = agent_cfg.get("params", {}).get("algo", {}).get("name")
+    normalized_algo_name = str(algo_name).strip().lower() if algo_name is not None else "a2c_continuous"
+    if normalized_algo_name == "sac":
+        return SAC
+    if normalized_algo_name not in {"ppo", "a2c_continuous", "a2c"}:
+        raise ValueError(f"Unsupported RL-Games algo in agent cfg: '{algo_name}'.")
+
+    recurrent_type = _get_agent_cfg_recurrent_type(agent_cfg)
+    if recurrent_type == "gru":
+        return PPO_GRU
+    if recurrent_type == "lstm":
+        return PPO_LSTM
+    return PPO_MLP
+
+
+def _load_saved_agent_cfg_from_checkpoint(checkpoint_path: str) -> dict | None:
+    checkpoint_file = Path(checkpoint_path).resolve()
+    params_file = checkpoint_file.parents[1] / "params" / "agent.yaml"
+    if not params_file.is_file():
+        return None
+
+    with open(params_file, encoding="utf-8") as file_handle:
+        return yaml.full_load(file_handle)
+
+
+def _default_wandb_project_name(task_name: str, fallback_name: str | None = None) -> str:
+    return "Factory"
+
+
+def _default_wandb_run_name(base_name: str, log_dir: str) -> str:
+    return f"{base_name}-{log_dir}"
 
 
 def _resolve_log_dir(config_name: str, configured_name: str | None) -> str:
@@ -143,6 +261,13 @@ def _resolve_log_dir(config_name: str, configured_name: str | None) -> str:
         return timestamp
 
     return f"{configured_name}_{timestamp}"
+
+
+def _resolve_run_dir_pattern(configured_name: str | None) -> str:
+    if configured_name is None:
+        return ".*"
+    configured_name = str(configured_name).strip()
+    return configured_name if configured_name else ".*"
 
 
 def _upload_wandb_checkpoints(wandb_run, run_dir: Path, config_name: str) -> None:
@@ -211,7 +336,7 @@ def _prepare_wandb_dirs() -> Path:
     return run_dir
 
 
-@hydra_task_config(args_cli.task, args_cli.agent)
+@hydra_task_config(args_cli.task, agent_cfg_entry_point)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict) -> None:
     """Train an RL-Games agent."""
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
@@ -223,17 +348,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if args_cli.seed == -1:
         args_cli.seed = random.randint(0, 10000)
 
+    saved_agent_cfg = None
+    if args_cli.checkpoint is not None:
+        resume_path = retrieve_file_path(args_cli.checkpoint)
+        saved_agent_cfg = _load_saved_agent_cfg_from_checkpoint(resume_path)
+        if saved_agent_cfg is not None:
+            agent_cfg = saved_agent_cfg
+
+        agent_cfg["params"]["load_checkpoint"] = True
+        agent_cfg["params"]["load_path"] = resume_path
+        print(f"[INFO]: Loading model checkpoint from: {agent_cfg['params']['load_path']}")
+
+    effective_algorithm = _get_agent_cfg_algorithm(agent_cfg)
+    effective_algorithm_family = _get_algorithm_family(effective_algorithm)
+    if effective_algorithm_family == SAC:
+        upgrade_factory_sac_agent_cfg(agent_cfg)
+    print(f"[INFO] Using RL-Games algorithm: {effective_algorithm}")
+
     agent_cfg["params"]["seed"] = args_cli.seed if args_cli.seed is not None else agent_cfg["params"]["seed"]
     agent_cfg["params"]["config"]["max_epochs"] = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg["params"]["config"]["max_epochs"]
     )
 
-    if args_cli.checkpoint is not None:
-        resume_path = retrieve_file_path(args_cli.checkpoint)
-        agent_cfg["params"]["load_checkpoint"] = True
-        agent_cfg["params"]["load_path"] = resume_path
-        print(f"[INFO]: Loading model checkpoint from: {agent_cfg['params']['load_path']}")
-
+    if args_cli.sigma is not None and effective_algorithm_family != "PPO":
+        raise ValueError("'--sigma' is only supported for RL-Games PPO.")
     train_sigma = float(args_cli.sigma) if args_cli.sigma is not None else None
 
     if args_cli.distributed:
@@ -251,8 +389,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg["params"]["config"]["train_dir"] = log_root_path
     agent_cfg["params"]["config"]["full_experiment_name"] = log_dir
 
-    wandb_project = config_name if args_cli.wandb_project_name is None else args_cli.wandb_project_name
-    experiment_name = log_dir if args_cli.wandb_name is None else args_cli.wandb_name
+    wandb_project = (
+        _default_wandb_project_name(args_cli.task, config_name)
+        if args_cli.wandb_project_name is None
+        else args_cli.wandb_project_name
+    )
+    experiment_name = (
+        _default_wandb_run_name(config_name, log_dir) if args_cli.wandb_name is None else args_cli.wandb_name
+    )
 
     dump_yaml(os.path.join(log_root_path, log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_root_path, log_dir, "params", "agent.yaml"), agent_cfg)
@@ -287,7 +431,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     start_time = time.time()
 
-    env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
+    wrapper_cls = FactoryRlGamesVecEnvWrapper if effective_algorithm_family == SAC else RlGamesVecEnvWrapper
+    env = wrapper_cls(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
+    agent_cfg["params"]["config"]["max_env_steps"] = int(env.unwrapped.max_episode_length)
 
     vecenv.register(
         "IsaacRlgWrapper", lambda config_name, num_actors, **kwargs: RlGamesGpuEnv(config_name, num_actors, **kwargs)
@@ -301,6 +447,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         runner = Runner(observers)
     else:
         runner = Runner(IsaacAlgoObserver())
+
+    if effective_algorithm_family == SAC:
+        register_factory_rl_games_sac(runner)
 
     runner.load(agent_cfg)
     runner.reset()

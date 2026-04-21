@@ -4,7 +4,10 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .codex
+.vscode/
 logs/
 outputs/
 wandb/
 videos/
+run/
+runs/

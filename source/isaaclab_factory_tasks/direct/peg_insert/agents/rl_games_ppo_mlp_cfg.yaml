@@ -38,19 +38,11 @@ params:
       regularizer:
         name: None
 
-    rnn:
-      name: lstm
-      units: 1024
-      layers: 2
-      before_mlp: True
-      concat_input: True
-      layer_norm: True
-
   load_checkpoint: False
   load_path: ""
 
   config:
-    name: FactoryPegInsert
+    name: FactoryPegInsertMLP
     device: cuda:0
     full_experiment_name: ""
     env_name: rlgpu
@@ -79,12 +71,12 @@ params:
     entropy_coef: 0.0
     truncate_grads: True
     e_clip: 0.2
-    horizon_length: 32
+    horizon_length: 128
     minibatch_size: 512
     mini_epochs: 4
     critic_coef: 2
     clip_value: True
-    seq_length: 32
+    seq_length: 1
     bounds_loss_coef: 0.0001
 
     central_value_config:
@@ -110,14 +102,6 @@ params:
             name: default
           regularizer:
             name: None
-
-        rnn:
-          name: lstm
-          units: 1024
-          layers: 2
-          before_mlp: True
-          concat_input: True
-          layer_norm: True
 
     player:
       deterministic: False

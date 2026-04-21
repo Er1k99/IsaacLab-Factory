@@ -348,6 +348,11 @@ class PegInsertEnv(DirectRLEnv):
 
     def _get_rewards(self) -> torch.Tensor:
         """Compute reward and update episode statistics."""
+        if torch.any(self.reset_buf):
+            self.extras["terminal_observation"] = {key: value.clone() for key, value in self._get_observations().items()}
+        else:
+            self.extras.pop("terminal_observation", None)
+
         curr_successes = self._get_curr_successes(success_threshold=self.task_cfg.success_threshold)
         rew_dict, rew_scales = self._get_reward_terms(curr_successes)
 
