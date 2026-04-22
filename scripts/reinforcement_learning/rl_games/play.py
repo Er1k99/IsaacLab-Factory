@@ -76,7 +76,7 @@ parser.add_argument(
     "--algorithm",
     type=str,
     default="PPO_GRU",
-    choices=["PPO", "PPO_GRU", "PPO_LSTM", "PPO_MLP", "SAC"],
+    choices=["PPO", "PPO_GRU", "PPO_LSTM", "PPO_MLP", "PPO_TRANSFORMER", "PPO_TRANSFORMER_GRU", "SAC"],
     help="RL-Games algorithm/network preset to play. 'PPO' is kept as a backward-compatible alias for 'PPO_GRU'.",
 )
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
@@ -135,13 +135,21 @@ from isaaclab_factory_tasks.utils.rl_games_sac import (
     register_factory_rl_games_sac,
     upgrade_factory_sac_agent_cfg,
 )
+from isaaclab_factory_tasks.utils.rl_games_transformer import (
+    FactoryTemporalRlGamesVecEnvWrapper,
+    get_factory_transformer_history_length,
+    is_factory_transformer_agent_cfg,
+    register_factory_rl_games_transformer,
+)
 
 
 PPO_GRU = "PPO_GRU"
 PPO_LSTM = "PPO_LSTM"
 PPO_MLP = "PPO_MLP"
+PPO_TRANSFORMER = "PPO_TRANSFORMER"
+PPO_TRANSFORMER_GRU = "PPO_TRANSFORMER_GRU"
 SAC = "SAC"
-PPO_VARIANTS = {PPO_GRU, PPO_LSTM, PPO_MLP}
+PPO_VARIANTS = {PPO_GRU, PPO_LSTM, PPO_MLP, PPO_TRANSFORMER, PPO_TRANSFORMER_GRU}
 
 
 def _normalize_rl_games_algorithm(algorithm_name: str | None) -> str | None:
@@ -155,11 +163,15 @@ def _normalize_rl_games_algorithm(algorithm_name: str | None) -> str | None:
         return PPO_LSTM
     if normalized == "ppo_mlp":
         return PPO_MLP
+    if normalized == "ppo_transformer":
+        return PPO_TRANSFORMER
+    if normalized == "ppo_transformer_gru":
+        return PPO_TRANSFORMER_GRU
     if normalized == "sac":
         return SAC
     raise ValueError(
         f"Unsupported RL-Games algorithm: '{algorithm_name}'. Expected one of: "
-        "PPO_GRU, PPO_LSTM, PPO_MLP, SAC."
+        "PPO_GRU, PPO_LSTM, PPO_MLP, PPO_TRANSFORMER, PPO_TRANSFORMER_GRU, SAC."
     )
 
 
@@ -178,6 +190,8 @@ def _resolve_default_agent_cfg_entry_point(algorithm_name: str) -> str:
         PPO_GRU: "rl_games_ppo_gru_cfg_entry_point",
         PPO_LSTM: "rl_games_ppo_lstm_cfg_entry_point",
         PPO_MLP: "rl_games_ppo_mlp_cfg_entry_point",
+        PPO_TRANSFORMER: "rl_games_ppo_transformer_cfg_entry_point",
+        PPO_TRANSFORMER_GRU: "rl_games_ppo_transformer_gru_cfg_entry_point",
         SAC: "rl_games_sac_cfg_entry_point",
     }
     return entry_points[algorithm_name]
@@ -202,6 +216,15 @@ def _get_agent_cfg_algorithm(agent_cfg: dict) -> str:
         return SAC
     if normalized_algo_name not in {"ppo", "a2c_continuous", "a2c"}:
         raise ValueError(f"Unsupported RL-Games algo in agent cfg: '{algo_name}'.")
+    if is_factory_transformer_agent_cfg(agent_cfg):
+        recurrent_type = str(agent_cfg.get("params", {}).get("network", {}).get("rnn", {}).get("name", "")).strip().lower()
+        if recurrent_type == "gru":
+            return PPO_TRANSFORMER_GRU
+        if recurrent_type != "":
+            raise ValueError(
+                f"Unsupported recurrent type '{recurrent_type}' for the local transformer PPO network."
+            )
+        return PPO_TRANSFORMER
 
     rnn_cfg = agent_cfg.get("params", {}).get("network", {}).get("rnn")
     if not isinstance(rnn_cfg, dict):
@@ -304,8 +327,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
-    wrapper_cls = FactoryRlGamesVecEnvWrapper if effective_algorithm_family == SAC else RlGamesVecEnvWrapper
-    env = wrapper_cls(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
+    if effective_algorithm_family == SAC:
+        env = FactoryRlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
+    elif effective_algorithm in {PPO_TRANSFORMER, PPO_TRANSFORMER_GRU}:
+        env = FactoryTemporalRlGamesVecEnvWrapper(
+            env,
+            rl_device,
+            clip_obs,
+            clip_actions,
+            obs_groups,
+            concate_obs_groups,
+            history_length=get_factory_transformer_history_length(agent_cfg),
+        )
+    else:
+        env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
 
     vecenv.register(
         "IsaacRlgWrapper", lambda config_name, num_actors, **kwargs: RlGamesGpuEnv(config_name, num_actors, **kwargs)
@@ -319,6 +354,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg["params"]["config"]["num_actors"] = env.unwrapped.num_envs
     _enable_player_vecenv(agent_cfg)
     runner = Runner()
+    if effective_algorithm in {PPO_TRANSFORMER, PPO_TRANSFORMER_GRU}:
+        register_factory_rl_games_transformer()
     if effective_algorithm_family == SAC:
         register_factory_rl_games_sac(runner)
     runner.load(agent_cfg)

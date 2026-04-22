@@ -47,7 +47,7 @@ params:
     reward_shaper:
       scale_value: 1.0
 
-    max_epochs: 1000
+    max_epochs: 800
     num_steps_per_episode: 32
     save_best_after: 20
     save_frequency: 50

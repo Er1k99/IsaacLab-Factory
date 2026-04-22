@@ -20,6 +20,8 @@ gym.register(
         "rl_games_ppo_gru_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_gru_cfg.yaml",
         "rl_games_ppo_lstm_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_lstm_cfg.yaml",
         "rl_games_ppo_mlp_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_mlp_cfg.yaml",
+        "rl_games_ppo_transformer_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_transformer_cfg.yaml",
+        "rl_games_ppo_transformer_gru_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_transformer_gru_cfg.yaml",
         "rl_games_sac_cfg_entry_point": f"{agents.__name__}:rl_games_sac_cfg.yaml",
     },
 )

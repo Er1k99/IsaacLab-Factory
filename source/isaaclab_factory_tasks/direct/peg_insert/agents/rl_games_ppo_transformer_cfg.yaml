@@ -15,7 +15,7 @@ params:
     name: continuous_a2c_logstd
 
   network:
-    name: actor_critic
+    name: factory_transformer_actor_critic
     separate: False
 
     space:
@@ -28,8 +28,9 @@ params:
           name: const_initializer
           val: 0
         fixed_sigma: False
+
     mlp:
-      units: [512, 128, 64]
+      units: [256, 128]
       activation: elu
       d2rl: False
 
@@ -38,19 +39,24 @@ params:
       regularizer:
         name: None
 
-    rnn:
-      name: lstm
-      units: 1024
-      layers: 2
-      before_mlp: True
-      concat_input: True
-      layer_norm: True
+    transformer:
+      history_length: 8
+      hidden_size: 128
+      num_heads: 4
+      num_layers: 4
+      feedforward_size: 512
+      dropout: 0.0
+      pooling: cls
+      activation: gelu
+      norm_first: True
+      final_norm: True
+      use_bias: True
 
   load_checkpoint: False
   load_path: ""
 
   config:
-    name: FactoryPegInsertLSTM
+    name: FactoryPegInsertTransformer
     device: cuda:0
     full_experiment_name: ""
     env_name: rlgpu
@@ -84,7 +90,7 @@ params:
     mini_epochs: 4
     critic_coef: 2
     clip_value: True
-    seq_length: 128
+    seq_length: 1
     bounds_loss_coef: 0.0001
 
     central_value_config:
@@ -98,11 +104,11 @@ params:
       truncate_grads: True
 
       network:
-        name: actor_critic
+        name: factory_transformer_actor_critic
         central_value: True
 
         mlp:
-          units: [512, 128, 64]
+          units: [256, 128]
           activation: elu
           d2rl: False
 
@@ -111,13 +117,18 @@ params:
           regularizer:
             name: None
 
-        rnn:
-          name: lstm
-          units: 512
-          layers: 1
-          before_mlp: True
-          concat_input: True
-          layer_norm: True
+        transformer:
+          history_length: 8
+          hidden_size: 128
+          num_heads: 4
+          num_layers: 4
+          feedforward_size: 512
+          dropout: 0.0
+          pooling: cls
+          activation: gelu
+          norm_first: True
+          final_norm: True
+          use_bias: True
 
     player:
       deterministic: False

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_ROOT = REPO_ROOT / "source"
 
 
@@ -53,13 +53,13 @@ except ModuleNotFoundError as exc:
 import torch
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--num_envs", type=int, default=32)
-parser.add_argument("--num_episodes", type=int, default=100)
+parser.add_argument("--num_envs", type=int, default=256)
+parser.add_argument("--num_episodes", type=int, default=1000)
 parser.add_argument(
     "--eval_mode",
     type=str,
     default="scripted",
-    choices=["scripted", "ppo_gru", "ppo_lstm", "sac"],
+    choices=["scripted", "ppo_gru", "ppo_lstm", "ppo_mlp", "ppo_transformer", "ppo_transformer_gru", "sac"],
     help="Evaluation mode: scripted IK baseline, RL-Games PPO checkpoint, or an RL-Games SAC checkpoint.",
 )
 parser.add_argument(
@@ -97,6 +97,8 @@ import gymnasium as gym
 import isaaclab_factory_tasks  # noqa: F401
 from isaaclab_factory_tasks.direct.peg_insert.env_cfg import PegInsertEnvCfg
 
+FACTORY_TRANSFORMER_COMPONENT_NAME = "factory_transformer_actor_critic"
+
 
 def _get_step_dt(env) -> float:
     if hasattr(env, "step_dt"):
@@ -111,6 +113,54 @@ def _normalize_recurrent_type(rnn_name: str | None) -> str | None:
     if normalized not in {"gru", "lstm"}:
         raise ValueError(f"Unsupported recurrent type: '{rnn_name}'. Expected one of: gru, lstm.")
     return normalized
+
+
+def _normalize_ppo_variant(variant_name: str) -> str:
+    normalized = str(variant_name).strip().lower()
+    if normalized not in {"gru", "lstm", "mlp", "transformer", "transformer_gru"}:
+        raise ValueError(
+            f"Unsupported PPO variant: '{variant_name}'. Expected one of: gru, lstm, mlp, transformer, transformer_gru."
+        )
+    return normalized
+
+
+def _is_factory_transformer_agent_cfg(agent_cfg: dict) -> bool:
+    network_cfg = agent_cfg.get("params", {}).get("network", {})
+    return str(network_cfg.get("name", "")).strip().lower() == FACTORY_TRANSFORMER_COMPONENT_NAME
+
+
+def _register_factory_rl_games_transformer() -> None:
+    from isaaclab_factory_tasks.utils.rl_games_transformer import register_factory_rl_games_transformer
+
+    register_factory_rl_games_transformer()
+
+
+def _get_factory_transformer_history_length(agent_cfg: dict) -> int:
+    from isaaclab_factory_tasks.utils.rl_games_transformer import get_factory_transformer_history_length
+
+    return get_factory_transformer_history_length(agent_cfg)
+
+
+def _get_ppo_cfg_entry_point_key(variant_name: str) -> str:
+    variant_name = _normalize_ppo_variant(variant_name)
+    entry_points = {
+        "gru": "rl_games_ppo_gru_cfg_entry_point",
+        "lstm": "rl_games_ppo_lstm_cfg_entry_point",
+        "mlp": "rl_games_ppo_mlp_cfg_entry_point",
+        "transformer": "rl_games_ppo_transformer_cfg_entry_point",
+        "transformer_gru": "rl_games_ppo_transformer_gru_cfg_entry_point",
+    }
+    return entry_points[variant_name]
+
+
+def _get_ppo_variant_label(agent_cfg: dict) -> str:
+    if _is_factory_transformer_agent_cfg(agent_cfg):
+        recurrent_type = _get_agent_cfg_recurrent_type(agent_cfg)
+        if recurrent_type == "gru":
+            return "transformer_gru"
+        return "transformer"
+    recurrent_type = _get_agent_cfg_recurrent_type(agent_cfg)
+    return recurrent_type if recurrent_type is not None else "mlp"
 
 
 def _get_agent_cfg_recurrent_type(agent_cfg: dict) -> str | None:
@@ -139,26 +189,6 @@ def _set_agent_cfg_recurrent_type(agent_cfg: dict, recurrent_type: str) -> None:
 
     if not updated:
         raise ValueError("The loaded RL-Games config does not define an RNN block to override.")
-
-
-def _strip_recurrent_suffix(config_name: str) -> str:
-    lowered = config_name.lower()
-    for suffix in ("gru", "lstm"):
-        if lowered.endswith(suffix):
-            return config_name[: -len(suffix)]
-    return config_name
-
-
-def _resolve_config_name_for_recurrent_type(
-    config_name: str,
-    current_recurrent_type: str | None,
-    requested_recurrent_type: str | None,
-) -> str:
-    requested_recurrent_type = _normalize_recurrent_type(requested_recurrent_type)
-    current_recurrent_type = _normalize_recurrent_type(current_recurrent_type)
-    if requested_recurrent_type is None or requested_recurrent_type == current_recurrent_type:
-        return config_name
-    return f"{_strip_recurrent_suffix(config_name)}{requested_recurrent_type.upper()}"
 
 
 def _list_experiments(log_group: str) -> list[str]:
@@ -328,7 +358,7 @@ def run_scripted_baseline() -> None:
     env.close()
 
 
-def run_ppo_eval(requested_recurrent_type: str) -> None:
+def run_ppo_eval(requested_variant: str) -> None:
     try:
         from rl_games.common import env_configurations, vecenv
         from rl_games.common.player import BasePlayer
@@ -347,9 +377,11 @@ def run_ppo_eval(requested_recurrent_type: str) -> None:
     if args_cli.seed == -1:
         args_cli.seed = random.randint(0, 10000)
 
-    registry_agent_cfg = load_cfg_from_registry(args_cli.task, "rl_games_cfg_entry_point")
+    requested_variant = _normalize_ppo_variant(requested_variant)
+    requested_recurrent_type = requested_variant if requested_variant in {"gru", "lstm"} else None
+
+    registry_agent_cfg = load_cfg_from_registry(args_cli.task, _get_ppo_cfg_entry_point_key(requested_variant))
     registry_recurrent_type = _get_agent_cfg_recurrent_type(registry_agent_cfg)
-    requested_recurrent_type = _normalize_recurrent_type(requested_recurrent_type)
     if requested_recurrent_type is not None and requested_recurrent_type != registry_recurrent_type:
         _set_agent_cfg_recurrent_type(registry_agent_cfg, requested_recurrent_type)
 
@@ -359,12 +391,10 @@ def run_ppo_eval(requested_recurrent_type: str) -> None:
         env_cfg.sim.device = args_cli.device
 
     if args_cli.checkpoint is None:
-        default_experiment = _resolve_config_name_for_recurrent_type(
-            registry_agent_cfg["params"]["config"]["name"], registry_recurrent_type, requested_recurrent_type
-        )
+        default_experiment = registry_agent_cfg["params"]["config"]["name"]
         preferred_experiment = args_cli.experiment or default_experiment
         log_root_path = _resolve_log_root("rl_games", preferred_experiment)
-        print(f"[PPO-{requested_recurrent_type.upper()}] Loading experiment from directory: {log_root_path}")
+        print(f"[PPO-{requested_variant.upper()}] Loading experiment from directory: {log_root_path}")
 
         run_dir = _resolve_run_dir_pattern(registry_agent_cfg["params"]["config"].get("full_experiment_name"))
         checkpoint_file = ".*" if args_cli.use_last_checkpoint else f"{preferred_experiment}.pth"
@@ -396,7 +426,20 @@ def run_ppo_eval(requested_recurrent_type: str) -> None:
     obs_groups = agent_cfg["params"]["env"].get("obs_groups")
     concate_obs_groups = agent_cfg["params"]["env"].get("concate_obs_groups", True)
 
-    env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
+    if _is_factory_transformer_agent_cfg(agent_cfg):
+        from isaaclab_factory_tasks.utils.rl_games_transformer import FactoryTemporalRlGamesVecEnvWrapper
+
+        env = FactoryTemporalRlGamesVecEnvWrapper(
+            env,
+            rl_device,
+            clip_obs,
+            clip_actions,
+            obs_groups,
+            concate_obs_groups,
+            history_length=_get_factory_transformer_history_length(agent_cfg),
+        )
+    else:
+        env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
     vecenv.register(
         "IsaacRlgWrapper",
         lambda config_name, num_actors, **kwargs: RlGamesGpuEnv(config_name, num_actors, **kwargs),
@@ -406,10 +449,13 @@ def run_ppo_eval(requested_recurrent_type: str) -> None:
     agent_cfg["params"]["load_checkpoint"] = True
     agent_cfg["params"]["load_path"] = resume_path
     agent_cfg["params"]["config"]["num_actors"] = env.unwrapped.num_envs
-    print(f"[PPO-{effective_recurrent_type.upper()}] Loading checkpoint: {resume_path}")
+    effective_variant = _get_ppo_variant_label(agent_cfg)
+    print(f"[PPO-{effective_variant.upper()}] Loading checkpoint: {resume_path}")
 
     _enable_player_vecenv(agent_cfg)
     runner = Runner()
+    if _is_factory_transformer_agent_cfg(agent_cfg):
+        _register_factory_rl_games_transformer()
     runner.load(agent_cfg)
     agent: BasePlayer = runner.create_player()
     agent.restore(resume_path)
@@ -434,10 +480,10 @@ def run_ppo_eval(requested_recurrent_type: str) -> None:
     episode_success = torch.zeros(base_env.num_envs, dtype=torch.bool, device=device)
     success_step = torch.zeros(base_env.num_envs, dtype=torch.long, device=device)
 
-    progress_label = f"ppo_{effective_recurrent_type}"
-    summary_label = f"PPO {effective_recurrent_type.upper()} Evaluation"
-    print(f"[PPO-{effective_recurrent_type.upper()}] Running {args_cli.num_episodes} episodes...")
-    print(f"[PPO-{effective_recurrent_type.upper()}] Step dt = {step_dt:.4f}s, max_episode_length = {base_env.max_episode_length}")
+    progress_label = f"ppo_{effective_variant}"
+    summary_label = f"PPO {effective_variant.upper()} Evaluation"
+    print(f"[PPO-{effective_variant.upper()}] Running {args_cli.num_episodes} episodes...")
+    print(f"[PPO-{effective_variant.upper()}] Step dt = {step_dt:.4f}s, max_episode_length = {base_env.max_episode_length}")
 
     play_step = 0
     while total_episodes < args_cli.num_episodes and simulation_app.is_running():
@@ -643,6 +689,12 @@ if __name__ == "__main__":
         run_scripted_baseline()
     elif args_cli.eval_mode == "ppo_lstm":
         run_ppo_eval("lstm")
+    elif args_cli.eval_mode == "ppo_mlp":
+        run_ppo_eval("mlp")
+    elif args_cli.eval_mode == "ppo_transformer":
+        run_ppo_eval("transformer")
+    elif args_cli.eval_mode == "ppo_transformer_gru":
+        run_ppo_eval("transformer_gru")
     elif args_cli.eval_mode == "sac":
         run_sac_eval()
     else:

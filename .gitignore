@@ -11,3 +11,4 @@ wandb/
 videos/
 run/
 runs/
+/best_model/

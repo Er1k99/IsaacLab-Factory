@@ -113,8 +113,8 @@ params:
 
         rnn:
           name: gru
-          units: 512
-          layers: 1
+          units: 1024
+          layers: 2
           before_mlp: True
           concat_input: True
           layer_norm: True
