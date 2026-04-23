@@ -12,9 +12,12 @@ videos/
 run/
 runs/
 /best_model/
+/best_history_model/
 
 # checkpoints and logs
 best_model/
+best_history_model/
+best_model.zip
 *.pth
 *.pt
 *.tfevents*

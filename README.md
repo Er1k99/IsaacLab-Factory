@@ -127,8 +127,12 @@ Props/Mounts/SeattleLabTable/table_instanceable.usd
 
 ## Installation
 
+- Set Conda environment:
+```bash
+conda create -n ME5406 python=3.11 -y
+conda activate ME5406
+```
 - Set the IsaacLab root directory:
-
 ```bash
 export ISAACLAB_ROOT="your_isaaclab_path"
 ```
