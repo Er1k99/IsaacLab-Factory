@@ -318,13 +318,13 @@ scripts/reinforcement_learning/classic_method/
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/classic_method/scripted_baseline.py \
   --num_envs 32 \
-  --num_episodes 100
+  --num_episodes 1000
 ```
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/classic_method/rrt2_baseline.py \
   --num_envs 32 \
-  --num_episodes 100
+  --num_episodes 1000
 ```
 
 ## Output Directories
