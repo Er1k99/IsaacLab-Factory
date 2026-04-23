@@ -1,0 +1,115 @@
+seed: 42
+
+# TD3 for PegInsert — same template as peg_pick/skrl_td3_cfg.yaml.
+# Only the preprocessor sizes differ (PegInsert obs/state dims).
+
+models:
+  separate: True
+  policy:
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: STATES
+        layers: [512, 128, 64]
+        activations: elu
+    output: ACTIONS
+  target_policy:
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: STATES
+        layers: [512, 128, 64]
+        activations: elu
+    output: ACTIONS
+  critic_1:
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: concatenate([STATES, ACTIONS])
+        layers: [512, 128, 64]
+        activations: elu
+    output: ONE
+  critic_2:
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: concatenate([STATES, ACTIONS])
+        layers: [512, 128, 64]
+        activations: elu
+    output: ONE
+  target_critic_1:
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: concatenate([STATES, ACTIONS])
+        layers: [512, 128, 64]
+        activations: elu
+    output: ONE
+  target_critic_2:
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: concatenate([STATES, ACTIONS])
+        layers: [512, 128, 64]
+        activations: elu
+    output: ONE
+
+memory:
+  class: RandomMemory
+  memory_size: 16000
+
+agent:
+  class: TD3
+  gradient_steps: 1
+  batch_size: 1024
+  discount_factor: 0.99
+  polyak: 0.005
+  learning_rate: [3.0e-04, 3.0e-04]
+  learning_rate_scheduler: null
+  learning_rate_scheduler_kwargs: null
+
+  exploration_noise: GaussianNoise
+  exploration_noise_kwargs:
+    mean: 0.0
+    std: 0.1
+  # See peg_pick/skrl_td3_cfg.yaml for why exploration_scheduler is omitted.
+
+  smooth_regularization_noise: GaussianNoise
+  smooth_regularization_noise_kwargs:
+    mean: 0.0
+    std: 0.2
+  smooth_regularization_clip: 0.5
+
+  policy_delay: 2
+
+  observation_preprocessor: RunningStandardScaler
+  observation_preprocessor_kwargs:
+    size: 19
+    clip_threshold: 10.0
+  state_preprocessor: RunningStandardScaler
+  state_preprocessor_kwargs:
+    size: 43
+    clip_threshold: 10.0
+
+  random_timesteps: 5000
+  learning_starts: 5000
+  grad_norm_clip: 0.5
+  rewards_shaper_scale: 0.05
+  mixed_precision: false
+
+  experiment:
+    directory: logs/skrl/FactoryPegInsertTD3
+    experiment_name: ''
+    write_interval: auto
+    checkpoint_interval: 1000
+
+trainer:
+  class: SequentialTrainer
+  timesteps: 51200
+  environment_info: log

@@ -202,6 +202,9 @@ class PegInsertEnv(DirectRLEnv):
 
     def _pre_physics_step(self, action: torch.Tensor) -> None:
         """Apply EMA smoothing to policy actions."""
+        action = torch.nan_to_num(action, nan=0.0, posinf=1.0, neginf=-1.0)
+        action = torch.clamp(action, min=-1.0, max=1.0)
+
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         if env_ids.numel() > 0:
             self._reset_buffers(env_ids)

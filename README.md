@@ -1,118 +1,171 @@
 # IsaacLab-Factory
 
-这是一个独立的 IsaacLab 任务仓库，当前只包含一个本地注册的 `PegInsert` 直接强化学习环境：
+- `IsaacLab-Factory` is a standalone IsaacLab task repository.
+- The repository is used to train and evaluate the Factory PegInsert task.
+- The main maintained Gymnasium environment is:
 
-- task id: `Isaac-Factory-PegInsert-Local-Direct-v0`
-- Python 包名: `isaaclab-factory-tasks`
-- import 名称: `isaaclab_factory_tasks`
-
-仓库目标不是复刻整个上游 Factory 任务集，而是把 `PegInsert` 从原始多任务环境中单独抽出来，整理成一个更容易训练、回放和评估的本地任务包。
-
-## 当前能力
-
-- 注册本地 Gym 环境 `Isaac-Factory-PegInsert-Local-Direct-v0`
-- 提供 RL-Games 训练脚本、回放脚本和评估脚本
-- 支持以下 agent 配置
-  - `PPO_GRU`
-  - `PPO_LSTM`
-  - `PPO_MLP`
-  - `PPO_TRANSFORMER`
-  - `PPO_TRANSFORMER_GRU`
-  - `SAC`
-- 提供一个简单的 scripted baseline 用于离线评估
-- 为 RL-Games 增加两类本地扩展
-  - Transformer PPO 的时序观测堆叠封装
-  - SAC 的 asymmetric actor/critic 输入与终止观测修复
-
-## 环境概览
-
-当前任务使用 Franka 机械臂执行 8mm peg-hole 插销任务，环境配置来自 `source/isaaclab_factory_tasks/direct/peg_insert/`。
-
-默认配置要点：
-
-- 环境类：`PegInsertEnv`
-- 配置类：`PegInsertEnvCfg`
-- 默认并行环境数：`128`
-- 动作维度：`6`
-- 默认 episode 时长：`10.0 s`
-- 默认仿真设备：`cuda:0`
-
-任务资源依赖 IsaacLab / Nucleus 中的 Factory 资产，例如：
-
-- `Factory/factory_peg_8mm.usd`
-- `Factory/factory_hole_8mm.usd`
-- `Props/Mounts/SeattleLabTable/table_instanceable.usd`
-
-因此推荐始终在一个正常可运行的 IsaacLab / Isaac Sim 环境内启动本仓库脚本。
-
-## 依赖与前提
-
-最小前提不是单纯的 Python 环境，而是一个可运行的 IsaacLab 运行时。训练、回放和评估脚本都会直接导入：
-
-- `isaaclab`
-- `isaaclab_rl`
-- `isaaclab_assets`
-- `rl_games`
-
-仓库自身的 `pyproject.toml` 还声明了这些基础 Python 依赖：
-
-- `gymnasium`
-- `hydra-core`
-- `numpy<2`
-- `prettytable`
-- `PyYAML`
-- `torch>=2.7`
-
-推荐做法：
-
-1. 先准备好 IsaacLab / Isaac Sim 运行环境。
-2. 进入该运行环境后，再安装本仓库或直接用 `isaaclab.sh -p` 运行脚本。
-
-## 路径解析约定
-
-本仓库脚本会在启动时自动补充 Python 搜索路径，按下面顺序尝试发现 IsaacLab 源码：
-
-1. 当前仓库的 `source/`
-2. 环境变量 `ISAACLAB_ROOT`
-3. 环境变量 `ISAACLAB_PATH`
-4. `~/Isaaclab2.3.2`
-5. `~/IsaacLab`
-
-如果你的 IsaacLab 不在这些位置，先显式设置：
-
-```bash
-export ISAACLAB_ROOT=/path/to/IsaacLab
+```text
+Isaac-Factory-PegInsert-Local-Direct-v0
 ```
 
-## 安装
+- The code packages the IsaacLab Factory peg insertion task as an independent task.
+- The task supports standalone registration, training, playback, and evaluation.
+- The robot is a Franka manipulator.
+- The objective is to insert an 8 mm peg into an 8 mm hole.
+- The action is a 6D end-effector pose delta.
+- GPU-parallel simulation is used by default.
 
-如果你希望在交互式 Python、notebook 或其他自定义脚本里直接 `import isaaclab_factory_tasks`，建议在 IsaacLab 环境中执行：
+## Feature Overview
 
-```bash
-pip install -e .
+- Available workflows:
+
+| Category | Entry Point | Description |
+| --- | --- | --- |
+| Environment registration | `source/isaaclab_factory_tasks/direct/peg_insert/__init__.py` | Registers `Isaac-Factory-PegInsert-Local-Direct-v0` |
+| RL-Games training | `scripts/reinforcement_learning/rl_games/train.py` | Trains PPO / SAC |
+| RL-Games playback | `scripts/reinforcement_learning/rl_games/play.py` | Loads checkpoints for visualization or video recording |
+| RL-Games evaluation | `scripts/reinforcement_learning/rl_games/eval.py` | Reports success rate, successful steps, and successful time |
+| skrl TD3 training | `scripts/reinforcement_learning/skrl/train.py` | Trains TD3 |
+| skrl TD3 playback/evaluation | `scripts/reinforcement_learning/skrl/play.py` / `eval_td3.py` | Loads TD3 checkpoints for playback or success-rate evaluation |
+| Classic methods | `scripts/reinforcement_learning/classic_method/` | Scripted baseline and two RRT baselines |
+| Environment check | `scripts/environments/list_envs.py` | Lists registered environments |
+
+- Supported reinforcement learning agents:
+
+| Framework | Argument | Default Experiment Name | Config File |
+| --- | --- | --- | --- |
+| RL-Games | `PPO_GRU` | `FactoryPegInsertGRU` | `rl_games_ppo_gru_cfg.yaml` |
+| RL-Games | `PPO_LSTM` | `FactoryPegInsertLSTM` | `rl_games_ppo_lstm_cfg.yaml` |
+| RL-Games | `PPO_MLP` | `FactoryPegInsertMLP` | `rl_games_ppo_mlp_cfg.yaml` |
+| RL-Games | `PPO_TRANSFORMER` | `FactoryPegInsertTransformer` | `rl_games_ppo_transformer_cfg.yaml` |
+| RL-Games | `PPO_TRANSFORMER_GRU` | `FactoryPegInsertTransformerGRU` | `rl_games_ppo_transformer_gru_cfg.yaml` |
+| RL-Games | `SAC` | `FactoryPegInsertSAC` | `rl_games_sac_cfg.yaml` |
+| skrl | `TD3` | `FactoryPegInsertTD3` | `skrl_td3_cfg.yaml` |
+
+- `best_model/` contains reference checkpoints.
+- PPO / SAC reference models use the `.pth` format.
+- TD3 reference models use the `.pt` format.
+
+## Repository Structure
+
+```text
+IsaacLab-Factory/
+├── source/isaaclab_factory_tasks/          # Installable Python package for tasks, configs, and algorithm extensions
+│   ├── direct/peg_insert/                  # Main PegInsert DirectRLEnv task
+│   │   ├── __init__.py                     # Gymnasium task registration entry point
+│   │   ├── env.py                          # Environment step/reset/obs/reward/success logic
+│   │   ├── env_cfg.py                      # Simulation, robot, action space, observation space, and PhysX config
+│   │   ├── task_cfg.py                     # Peg/hole assets, randomization, reward parameters, and success threshold
+│   │   ├── control.py                      # OSC / IK control utilities
+│   │   ├── utils.py                        # Pose, keypoint, observation concatenation, and physics utilities
+│   │   └── agents/                         # RL-Games / skrl agent YAML configs
+│   └── utils/                              # Training-framework adapter layer
+│       ├── hydra.py                        # IsaacLab registry + Hydra overrides
+│       ├── parse_cfg.py                    # Config loading and checkpoint discovery
+│       ├── rl_games_sac.py                 # RL-Games SAC extension
+│       └── rl_games_transformer.py         # Transformer PPO network and sequence wrapper
+├── scripts/                                # Command-line entry points
+│   ├── environments/list_envs.py           # Environment registration check
+│   └── reinforcement_learning/
+│       ├── rl_games/                       # PPO/SAC training, playback, and evaluation
+│       ├── skrl/                           # TD3/skrl experiment workflow
+│       └── classic_method/                 # Scripted / RRT baselines
+├── best_model/                             # Reference checkpoints
+├── logs/                                   # Training logs and checkpoint outputs
+├── runs/                                   # Historical TensorBoard fallback logs
+├── config/extension.toml                   # IsaacLab extension metadata
+├── pyproject.toml                          # Package installation and Python dependency metadata
+├── requirements.txt                        # Pinned Python dependencies for the current environment
+└── README.md
 ```
 
-仅使用本仓库自带脚本时，即使不执行 `pip install -e .`，通常也能运行，因为脚本会自动把仓库 `source/` 加入 `sys.path`。不过为了避免环境差异，仍然建议安装一次。
+## Dependencies And Versions
 
-## 快速开始
+- Use the runtime launcher provided by IsaacLab.
+- Do not run training or evaluation scripts directly with the system Python.
+- Confirmed versions in the current environment:
 
-下面所有命令默认在仓库根目录执行。
+| Software / Library | Confirmed Version | Notes |
+| --- | --- | --- |
+| Python | `3.11.15` | Current conda environment version |
+| Isaac Sim | `5.1.0.0` | Required simulation runtime |
+| Isaac Lab | `0.54.2` or `2.3.2` | Required |
+| `isaaclab_rl` | `0.4.7` | Required RL wrapper |
+| `isaaclab_assets` | `0.2.4` | Required asset configs |
+| PyTorch | `2.7.0+cu128` | Required; `pyproject.toml` requires `torch>=2.7` |
+| Gymnasium | `1.2.1` | Required |
+| Hydra Core | `1.3.2` | Required |
+| NumPy | `1.26.0` | Required; `pyproject.toml` requires `numpy<2` |
+| PyYAML | `6.0.2` | Required |
+| rl-games | `1.6.1` | Required for RL-Games training/playback/evaluation |
+| prettytable | `3.3.0` | Environment list output |
+| TensorBoard | `2.20.0` | Training-curve visualization |
+| Weights & Biases | `0.25.1` | Optional; used when `--track` is enabled |
+| skrl | `2.0.0` | Required for TD3/skrl experiments only |
 
-### 1. 列出已注册环境
+- Minimum dependency constraints declared by this repository are in `pyproject.toml`:
+
+```text
+python >= 3.10
+torch >= 2.7
+numpy < 2
+```
+
+- Pinned Python dependencies for the current environment are listed in `requirements.txt`.
+- Simulation assets depend on the IsaacLab / Nucleus Factory resources.
+- Main assets:
+
+```text
+Factory/factory_peg_8mm.usd
+Factory/factory_hole_8mm.usd
+Props/Mounts/SeattleLabTable/table_instanceable.usd
+```
+
+- An NVIDIA GPU is recommended for training and evaluation.
+- The default simulation device is `cuda:0`.
+- The default number of parallel environments is `128`.
+
+## Installation
+
+- Set the IsaacLab root directory:
+
+```bash
+export ISAACLAB_ROOT="your_isaaclab_path"
+```
+
+- Install this repository in the IsaacLab Python environment:
+
+```bash
+$ISAACLAB_ROOT/isaaclab.sh -p -m pip install -e .
+```
+
+- Optionally install the pinned Python dependencies:
+
+```bash
+$ISAACLAB_ROOT/isaaclab.sh -p -m pip install -r requirements.txt
+```
+
+- Repository scripts automatically add `source/` to `sys.path`.
+- If you only run the scripts provided in this repository, installation is usually not required.
+- If you want to `import isaaclab_factory_tasks` in an interactive Python shell, notebook, or custom script, editable installation is recommended.
+
+## Quick Check
+
+- Run from the repository root:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/environments/list_envs.py --keyword PegInsert
 ```
 
-如果注册成功，你会看到 `Isaac-Factory-PegInsert-Local-Direct-v0`。
+- Expected output includes:
 
-### 2. 训练
+```text
+Isaac-Factory-PegInsert-Local-Direct-v0
+```
 
-训练脚本：
+## Training
 
-- `scripts/reinforcement_learning/rl_games/train.py`
-
-基础命令：
+- PPO GRU:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py \
@@ -121,18 +174,16 @@ $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py \
   --headless
 ```
 
-启用 Weights & Biases：
+- Transformer + GRU PPO:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
-  --algorithm PPO_GRU \
-  --track \
-  --wandb-entity <your_wandb_entity> \
+  --algorithm PPO_TRANSFORMER_GRU \
   --headless
 ```
 
-训练 SAC：
+- SAC:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py \
@@ -141,247 +192,200 @@ $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py \
   --headless
 ```
 
-训练 Transformer PPO：
+- TD3:
 
 ```bash
-$ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py \
+$ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
-  --algorithm PPO_TRANSFORMER \
+  --algorithm TD3 \
   --headless
 ```
 
-### 3. 回放 checkpoint
+- Common arguments:
 
-回放脚本：
+| Argument | Description |
+| --- | --- |
+| `--num_envs` | Overrides the number of parallel environments |
+| `--max_iterations` | Overrides the number of training iterations |
+| `--checkpoint` | Resumes training from a specified checkpoint |
+| `--track` | Enables W&B |
+| `--wandb-entity` | W&B entity |
+| `--sigma` | Initial PPO policy standard deviation |
 
-- `scripts/reinforcement_learning/rl_games/play.py`
+## Playback
 
-使用默认 best checkpoint 回放：
+- Load the default best checkpoint:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/play.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
   --algorithm PPO_GRU \
-  --num_envs 1
+  --num_envs 32
 ```
 
-使用最新 checkpoint 回放：
+- Load the latest checkpoint:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/play.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
   --algorithm PPO_GRU \
   --use_last_checkpoint \
-  --num_envs 1
+  --num_envs 32
 ```
 
-指定 checkpoint 回放：
+- Load a specified checkpoint:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/play.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
-  --algorithm SAC \
-  --checkpoint /path/to/checkpoint.pth \
-  --num_envs 1
+  --algorithm PPO_TRANSFORMER_GRU \
+  --checkpoint best_model/FactoryPegInsertTransformerGRU/nn/FactoryPegInsertTransformerGRU.pth \
+  --num_envs 32
 ```
 
-常用可选参数：
+## Evaluation
 
-- `--video`：录制回放视频，输出到对应 run 目录下的 `videos/play/`
-- `--real-time`：尽量按真实时间步长运行
-- `--print_peg_metrics`：定期打印 peg 高度 / lift 高度诊断信息
-- `--disable_fabric`：调试时可关闭 fabric
-
-### 4. 评估 scripted baseline 或 RL checkpoint
-
-评估脚本：
-
-- `scripts/reinforcement_learning/rl_games/eval.py`
-
-这个脚本会强制 `headless=True`，主要输出成功率、成功步数和成功时间统计，不负责可视化回放。
-
+- Evaluate the scripted baseline:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/eval.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
   --eval_mode scripted \
-  --checkpoint /path/to/checkpoint.pth
+  --num_envs 256 \
+  --num_episodes 1000
 ```
 
-评估 PPO_GRU：
+- Evaluate PPO:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/eval.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
-  --eval_mode ppo_gru \
-  --checkpoint /path/to/checkpoint.pth
+  --eval_mode ppo_transformer_gru \
+  --checkpoint best_model/FactoryPegInsertTransformerGRU/nn/FactoryPegInsertTransformerGRU.pth \
+  --num_envs 256 \
+  --num_episodes 1000
 ```
 
-评估 SAC：
+- Evaluate SAC:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/eval.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
   --eval_mode sac \
-  --checkpoint /path/to/checkpoint.pth
+  --checkpoint best_model/FactoryPegInsertSAC/nn/FactoryPegInsertSAC.pth \
+  --num_envs 256 \
+  --num_episodes 1000
 ```
 
-## 算法与默认实验名
-
-训练 / 回放时的 `--algorithm`，以及评估时的 `--eval_mode`，与默认实验目录名的对应关系如下：
-
-| 类型 | train/play 参数 | eval 参数 | 默认实验名 |
-| --- | --- | --- | --- |
-| PPO GRU | `PPO_GRU` | `ppo_gru` | `FactoryPegInsertGRU` |
-| PPO LSTM | `PPO_LSTM` | `ppo_lstm` | `FactoryPegInsertLSTM` |
-| PPO MLP | `PPO_MLP` | `ppo_mlp` | `FactoryPegInsertMLP` |
-| PPO Transformer | `PPO_TRANSFORMER` | `ppo_transformer` | `FactoryPegInsertTransformer` |
-| PPO Transformer + GRU | `PPO_TRANSFORMER_GRU` | `ppo_transformer_gru` | `FactoryPegInsertTransformerGRU` |
-| SAC | `SAC` | `sac` | `FactoryPegInsertSAC` |
-
-补充说明：
-
-- `PPO` 是 `PPO_GRU` 的兼容别名
-- `play.py` 默认加载 best checkpoint，即 `<默认实验名>.pth`
-- 加上 `--use_last_checkpoint` 后，`play.py` / `eval.py` 会改为加载最近一次保存的 checkpoint
-
-## Hydra 覆盖
-
-`train.py` 和 `play.py` 通过 Hydra 读取环境和 agent 配置，所以可以在命令末尾直接附加配置覆盖项。
-
-例如：
+- Evaluate TD3:
 
 ```bash
-$ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py \
+$ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/skrl/eval_td3.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
-  --algorithm PPO_GRU \
-  --headless \
-  env.scene.num_envs=256 \
-  agent.params.config.max_epochs=400
+  --eval_mode skrl \
+  --algorithm TD3 \
+  --checkpoint logs/skrl/FactoryPegInsertTD3/<RunDir>/checkpoints/best_agent.pt \
+  --num_envs 256 \
+  --num_episodes 1000
 ```
 
-脚本会自动把 Hydra 输出目录固定到当前仓库下的 `outputs/`，避免输出散落到外部目录。
+- Evaluation scripts use `headless=True` by default.
+- Evaluation scripts are intended for statistics, not visualization.
+- Output includes episode count, success count, success rate, average successful steps, and average successful time.
 
-## 输出目录
+## Classic Methods
 
-训练和评估时，和本仓库直接相关的输出主要落在以下位置：
+- Classic method scripts are located at:
 
 ```text
-logs/
-└── rl_games/
-    └── <ExperimentName>/
-        └── <RunDir>/
-            ├── nn/
-            ├── params/
-            └── videos/
-
-outputs/
-└── <Hydra 输出目录>
-
-wandb/
-├── runs/
-├── artifacts/
-├── data/
-└── .cache/
+scripts/reinforcement_learning/classic_method/
 ```
 
-其中：
+- Available scripts:
 
-- `params/env.yaml` 和 `params/agent.yaml` 会在训练启动时自动保存
-- `nn/` 中保存 RL-Games checkpoint
-- 训练视频输出到 `videos/train/`
-- 回放视频输出到 `videos/play/`
-- `wandb/` 下的本地缓存、artifact 和 run 数据会被固定在仓库内
+| File | Method |
+| --- | --- |
+| `scripted_baseline.py` | Hand-written two-stage policy: XY alignment followed by downward insertion |
+| `rrt_baseline.py` | Simplified Cartesian RRT path tracking |
+| `rrt2_baseline.py` | Cartesian RRT with simplified box collision avoidance |
 
-仓库根目录下还包含一个 `best_model/` 目录，里面是已保存的参考 checkpoint；默认脚本不会自动从这里检索模型，如果要使用其中某个模型，请显式传 `--checkpoint`。
+- Run examples:
 
-## 目录结构
+```bash
+$ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/classic_method/scripted_baseline.py \
+  --num_envs 32 \
+  --num_episodes 100
+```
+
+```bash
+$ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/classic_method/rrt2_baseline.py \
+  --num_envs 32 \
+  --num_episodes 100
+```
+
+## Output Directories
+
+- RL-Games training output:
 
 ```text
-source/isaaclab_factory_tasks/
-├── __init__.py
-├── direct/
-│   └── peg_insert/
-│       ├── __init__.py
-│       ├── agents/
-│       │   ├── rl_games_ppo_gru_cfg.yaml
-│       │   ├── rl_games_ppo_lstm_cfg.yaml
-│       │   ├── rl_games_ppo_mlp_cfg.yaml
-│       │   ├── rl_games_ppo_transformer_cfg.yaml
-│       │   ├── rl_games_ppo_transformer_gru_cfg.yaml
-│       │   └── rl_games_sac_cfg.yaml
-│       ├── control.py
-│       ├── env.py
-│       ├── env_cfg.py
-│       ├── task_cfg.py
-│       └── utils.py
-└── utils/
-    ├── hydra.py
-    ├── importer.py
-    ├── parse_cfg.py
-    ├── rl_games_sac.py
-    └── rl_games_transformer.py
-
-scripts/
-├── environments/
-│   └── list_envs.py
-└── reinforcement_learning/
-    └── rl_games/
-        ├── train.py
-        ├── play.py
-        └── eval.py
+logs/rl_games/<ExperimentName>/<RunDir>/
+├── nn/
+├── params/
+├── summaries/
+└── videos/
 ```
 
-几个关键文件的作用：
+- Contents:
 
-- `source/isaaclab_factory_tasks/direct/peg_insert/__init__.py`
-  - 注册 `Isaac-Factory-PegInsert-Local-Direct-v0`
-- `source/isaaclab_factory_tasks/direct/peg_insert/agents/*.yaml`
-  - 存放各类 RL-Games agent 配置
-- `source/isaaclab_factory_tasks/utils/rl_games_transformer.py`
-  - 实现本地 Transformer PPO 组件和时序观测 wrapper
-- `source/isaaclab_factory_tasks/utils/rl_games_sac.py`
-  - 实现本地 SAC 扩展
+| Path | Content |
+| --- | --- |
+| `nn/` | `.pth` checkpoints |
+| `params/env.yaml` | Environment config used during training |
+| `params/agent.yaml` | Agent config used during training |
+| `summaries/` | TensorBoard event logs |
 
+- Other directories:
 
-## 常见问题
+| Path | Content |
+| --- | --- |
+| `best_model/` | Reference checkpoints |
+| `logs/skrl/` | Historical TD3/skrl experiment logs |
+| `outputs/` | Hydra outputs |
+| `wandb/` | W&B local cache and artifacts |
+| `runs/` | Historical TensorBoard fallback logs |
 
-### 1. `ModuleNotFoundError: No module named 'isaaclab_factory_tasks'`
+- Open TensorBoard:
 
-优先检查：
+```bash
+tensorboard --logdir logs
+```
 
-- 是否从仓库脚本启动，而不是从其他目录直接运行零散代码
-- 是否已经在 IsaacLab 环境中执行 `pip install -e .`
-- 是否把 `ISAACLAB_ROOT` 指到了正确的 IsaacLab 目录
+## FAQ
 
-### 2. `Could not import IsaacLab runtime modules`
+### IsaacLab Modules Cannot Be Found
 
-这说明当前 Python 环境里没有可用的 IsaacLab / Isaac Sim 运行时。请改用 IsaacLab 的启动器执行，例如：
+- Use the IsaacLab launcher:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py --help
 ```
 
-### 3. 找不到 checkpoint
-
-`play.py` 和 `eval.py` 在未显式传 `--checkpoint` 时，会去：
-
-```text
-logs/rl_games/<默认实验名>/<run_dir>/nn/
-```
-
-下查找模型。
-
-如果你要加载旧实验或其他目录中的模型，请显式传入：
+- If IsaacLab is not in the default location, set:
 
 ```bash
---checkpoint /path/to/model.pth
+export ISAACLAB_ROOT=/path/to/IsaacLab
 ```
 
-### 4. 评估脚本为什么没有画面
+### Checkpoint Cannot Be Found
 
-`scripts/reinforcement_learning/rl_games/eval.py` 会强制以 `headless` 模式运行。它的目的不是可视化，而是统计成功率和成功时间。需要看可视化请使用 `play.py`。
+- The default checkpoint search directory is:
 
-## 当前仓库范围说明
+```text
+logs/rl_games/<ExperimentName>/<RunDir>/nn/
+```
 
-当前代码实际注册和维护的是本地 `PegInsert` 任务。仓库中虽然还存在少量其他调试脚本，但它们不属于当前主流程，也不代表这里已经完整提供了对应任务包。
+- If the model is in `best_model/` or another directory, pass it explicitly:
+
+```bash
+--checkpoint /absolute/or/relative/path/to/model.pth
+```

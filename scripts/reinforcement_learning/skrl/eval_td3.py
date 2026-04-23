@@ -47,7 +47,7 @@ try:
 except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
         "Could not import IsaacLab runtime modules. Run this script with a working IsaacLab/Isaac Sim environment, "
-        "for example: <isaaclab_root>/isaaclab.sh -p scripts/reinforcement_learning/rl_games/eval.py"
+        "for example: <isaaclab_root>/isaaclab.sh -p scripts/reinforcement_learning/skrl/eval_td3.py"
     ) from exc
 
 import torch
@@ -59,8 +59,15 @@ parser.add_argument(
     "--eval_mode",
     type=str,
     default="scripted",
-    choices=["scripted", "ppo_gru", "ppo_lstm", "ppo_mlp", "ppo_transformer", "ppo_transformer_gru", "sac"],
-    help="Evaluation mode: scripted IK baseline, RL-Games PPO checkpoint, or an RL-Games SAC checkpoint.",
+    choices=["scripted", "ppo_gru", "ppo_lstm", "sac", "skrl"],
+    help="Evaluation mode: scripted IK baseline, RL-Games PPO/SAC checkpoint, or a skrl checkpoint.",
+)
+parser.add_argument(
+    "--algorithm",
+    type=str,
+    default="TD3",
+    choices=["SAC", "TD3", "PPO"],
+    help="skrl algorithm family (only used with --eval_mode skrl).",
 )
 parser.add_argument(
     "--task",
@@ -97,13 +104,65 @@ import gymnasium as gym
 import isaaclab_factory_tasks  # noqa: F401
 from isaaclab_factory_tasks.direct.peg_insert.env_cfg import PegInsertEnvCfg
 
-FACTORY_TRANSFORMER_COMPONENT_NAME = "factory_transformer_actor_critic"
-
 
 def _get_step_dt(env) -> float:
     if hasattr(env, "step_dt"):
         return float(env.step_dt)
     return float(env.cfg.episode_length_s / env.max_episode_length)
+
+
+def _get_skrl_states(env, obs: torch.Tensor) -> torch.Tensor:
+    try:
+        return env.state()
+    except (AttributeError, NotImplementedError):
+        return obs
+
+
+def _make_action_bound(agent, value: float) -> torch.Tensor:
+    action_space = getattr(agent, "action_space", None)
+    shape = getattr(action_space, "shape", None) or (getattr(agent, "num_actions", 1),)
+    return torch.full(tuple(shape), value, device=agent.device)
+
+
+def _patch_skrl_unbounded_action_bounds(agent) -> None:
+    min_actions = _make_action_bound(agent, -1.0)
+    max_actions = _make_action_bound(agent, 1.0)
+
+    for owner in [agent, *getattr(agent, "models", {}).values()]:
+        if owner is None:
+            continue
+        for min_attr, max_attr in (
+            ("_min_actions", "_max_actions"),
+            ("_d_min_actions", "_d_max_actions"),
+            ("_g_min_actions", "_g_max_actions"),
+            ("_mg_min_actions", "_mg_max_actions"),
+        ):
+            if hasattr(owner, min_attr) and (
+                getattr(owner, min_attr, None) is None or getattr(owner, max_attr, None) is None
+            ):
+                setattr(owner, min_attr, min_actions)
+                setattr(owner, max_attr, max_actions)
+
+
+def _set_skrl_agent_eval_mode(agent) -> None:
+    set_legacy_training_mode = getattr(agent, "enable_models_training_mode", None)
+    if callable(set_legacy_training_mode):
+        set_legacy_training_mode(False)
+    elif callable(getattr(agent, "set_mode", None)):
+        agent.set_mode("eval")
+    else:
+        for model in getattr(agent, "models", {}).values():
+            if model is None:
+                continue
+            if callable(getattr(model, "set_mode", None)):
+                model.set_mode("eval")
+            elif callable(getattr(model, "eval", None)):
+                model.eval()
+
+    if callable(getattr(agent, "set_running_mode", None)):
+        agent.set_running_mode("eval")
+    if hasattr(agent, "_exploration_noise"):
+        agent._exploration_noise = None
 
 
 def _normalize_recurrent_type(rnn_name: str | None) -> str | None:
@@ -113,54 +172,6 @@ def _normalize_recurrent_type(rnn_name: str | None) -> str | None:
     if normalized not in {"gru", "lstm"}:
         raise ValueError(f"Unsupported recurrent type: '{rnn_name}'. Expected one of: gru, lstm.")
     return normalized
-
-
-def _normalize_ppo_variant(variant_name: str) -> str:
-    normalized = str(variant_name).strip().lower()
-    if normalized not in {"gru", "lstm", "mlp", "transformer", "transformer_gru"}:
-        raise ValueError(
-            f"Unsupported PPO variant: '{variant_name}'. Expected one of: gru, lstm, mlp, transformer, transformer_gru."
-        )
-    return normalized
-
-
-def _is_factory_transformer_agent_cfg(agent_cfg: dict) -> bool:
-    network_cfg = agent_cfg.get("params", {}).get("network", {})
-    return str(network_cfg.get("name", "")).strip().lower() == FACTORY_TRANSFORMER_COMPONENT_NAME
-
-
-def _register_factory_rl_games_transformer() -> None:
-    from isaaclab_factory_tasks.utils.rl_games_transformer import register_factory_rl_games_transformer
-
-    register_factory_rl_games_transformer()
-
-
-def _get_factory_transformer_history_length(agent_cfg: dict) -> int:
-    from isaaclab_factory_tasks.utils.rl_games_transformer import get_factory_transformer_history_length
-
-    return get_factory_transformer_history_length(agent_cfg)
-
-
-def _get_ppo_cfg_entry_point_key(variant_name: str) -> str:
-    variant_name = _normalize_ppo_variant(variant_name)
-    entry_points = {
-        "gru": "rl_games_ppo_gru_cfg_entry_point",
-        "lstm": "rl_games_ppo_lstm_cfg_entry_point",
-        "mlp": "rl_games_ppo_mlp_cfg_entry_point",
-        "transformer": "rl_games_ppo_transformer_cfg_entry_point",
-        "transformer_gru": "rl_games_ppo_transformer_gru_cfg_entry_point",
-    }
-    return entry_points[variant_name]
-
-
-def _get_ppo_variant_label(agent_cfg: dict) -> str:
-    if _is_factory_transformer_agent_cfg(agent_cfg):
-        recurrent_type = _get_agent_cfg_recurrent_type(agent_cfg)
-        if recurrent_type == "gru":
-            return "transformer_gru"
-        return "transformer"
-    recurrent_type = _get_agent_cfg_recurrent_type(agent_cfg)
-    return recurrent_type if recurrent_type is not None else "mlp"
 
 
 def _get_agent_cfg_recurrent_type(agent_cfg: dict) -> str | None:
@@ -189,6 +200,26 @@ def _set_agent_cfg_recurrent_type(agent_cfg: dict, recurrent_type: str) -> None:
 
     if not updated:
         raise ValueError("The loaded RL-Games config does not define an RNN block to override.")
+
+
+def _strip_recurrent_suffix(config_name: str) -> str:
+    lowered = config_name.lower()
+    for suffix in ("gru", "lstm"):
+        if lowered.endswith(suffix):
+            return config_name[: -len(suffix)]
+    return config_name
+
+
+def _resolve_config_name_for_recurrent_type(
+    config_name: str,
+    current_recurrent_type: str | None,
+    requested_recurrent_type: str | None,
+) -> str:
+    requested_recurrent_type = _normalize_recurrent_type(requested_recurrent_type)
+    current_recurrent_type = _normalize_recurrent_type(current_recurrent_type)
+    if requested_recurrent_type is None or requested_recurrent_type == current_recurrent_type:
+        return config_name
+    return f"{_strip_recurrent_suffix(config_name)}{requested_recurrent_type.upper()}"
 
 
 def _list_experiments(log_group: str) -> list[str]:
@@ -358,7 +389,7 @@ def run_scripted_baseline() -> None:
     env.close()
 
 
-def run_ppo_eval(requested_variant: str) -> None:
+def run_ppo_eval(requested_recurrent_type: str) -> None:
     try:
         from rl_games.common import env_configurations, vecenv
         from rl_games.common.player import BasePlayer
@@ -377,11 +408,9 @@ def run_ppo_eval(requested_variant: str) -> None:
     if args_cli.seed == -1:
         args_cli.seed = random.randint(0, 10000)
 
-    requested_variant = _normalize_ppo_variant(requested_variant)
-    requested_recurrent_type = requested_variant if requested_variant in {"gru", "lstm"} else None
-
-    registry_agent_cfg = load_cfg_from_registry(args_cli.task, _get_ppo_cfg_entry_point_key(requested_variant))
+    registry_agent_cfg = load_cfg_from_registry(args_cli.task, "rl_games_cfg_entry_point")
     registry_recurrent_type = _get_agent_cfg_recurrent_type(registry_agent_cfg)
+    requested_recurrent_type = _normalize_recurrent_type(requested_recurrent_type)
     if requested_recurrent_type is not None and requested_recurrent_type != registry_recurrent_type:
         _set_agent_cfg_recurrent_type(registry_agent_cfg, requested_recurrent_type)
 
@@ -391,10 +420,12 @@ def run_ppo_eval(requested_variant: str) -> None:
         env_cfg.sim.device = args_cli.device
 
     if args_cli.checkpoint is None:
-        default_experiment = registry_agent_cfg["params"]["config"]["name"]
+        default_experiment = _resolve_config_name_for_recurrent_type(
+            registry_agent_cfg["params"]["config"]["name"], registry_recurrent_type, requested_recurrent_type
+        )
         preferred_experiment = args_cli.experiment or default_experiment
         log_root_path = _resolve_log_root("rl_games", preferred_experiment)
-        print(f"[PPO-{requested_variant.upper()}] Loading experiment from directory: {log_root_path}")
+        print(f"[PPO-{requested_recurrent_type.upper()}] Loading experiment from directory: {log_root_path}")
 
         run_dir = _resolve_run_dir_pattern(registry_agent_cfg["params"]["config"].get("full_experiment_name"))
         checkpoint_file = ".*" if args_cli.use_last_checkpoint else f"{preferred_experiment}.pth"
@@ -426,20 +457,7 @@ def run_ppo_eval(requested_variant: str) -> None:
     obs_groups = agent_cfg["params"]["env"].get("obs_groups")
     concate_obs_groups = agent_cfg["params"]["env"].get("concate_obs_groups", True)
 
-    if _is_factory_transformer_agent_cfg(agent_cfg):
-        from isaaclab_factory_tasks.utils.rl_games_transformer import FactoryTemporalRlGamesVecEnvWrapper
-
-        env = FactoryTemporalRlGamesVecEnvWrapper(
-            env,
-            rl_device,
-            clip_obs,
-            clip_actions,
-            obs_groups,
-            concate_obs_groups,
-            history_length=_get_factory_transformer_history_length(agent_cfg),
-        )
-    else:
-        env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
+    env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
     vecenv.register(
         "IsaacRlgWrapper",
         lambda config_name, num_actors, **kwargs: RlGamesGpuEnv(config_name, num_actors, **kwargs),
@@ -449,13 +467,10 @@ def run_ppo_eval(requested_variant: str) -> None:
     agent_cfg["params"]["load_checkpoint"] = True
     agent_cfg["params"]["load_path"] = resume_path
     agent_cfg["params"]["config"]["num_actors"] = env.unwrapped.num_envs
-    effective_variant = _get_ppo_variant_label(agent_cfg)
-    print(f"[PPO-{effective_variant.upper()}] Loading checkpoint: {resume_path}")
+    print(f"[PPO-{effective_recurrent_type.upper()}] Loading checkpoint: {resume_path}")
 
     _enable_player_vecenv(agent_cfg)
     runner = Runner()
-    if _is_factory_transformer_agent_cfg(agent_cfg):
-        _register_factory_rl_games_transformer()
     runner.load(agent_cfg)
     agent: BasePlayer = runner.create_player()
     agent.restore(resume_path)
@@ -480,10 +495,10 @@ def run_ppo_eval(requested_variant: str) -> None:
     episode_success = torch.zeros(base_env.num_envs, dtype=torch.bool, device=device)
     success_step = torch.zeros(base_env.num_envs, dtype=torch.long, device=device)
 
-    progress_label = f"ppo_{effective_variant}"
-    summary_label = f"PPO {effective_variant.upper()} Evaluation"
-    print(f"[PPO-{effective_variant.upper()}] Running {args_cli.num_episodes} episodes...")
-    print(f"[PPO-{effective_variant.upper()}] Step dt = {step_dt:.4f}s, max_episode_length = {base_env.max_episode_length}")
+    progress_label = f"ppo_{effective_recurrent_type}"
+    summary_label = f"PPO {effective_recurrent_type.upper()} Evaluation"
+    print(f"[PPO-{effective_recurrent_type.upper()}] Running {args_cli.num_episodes} episodes...")
+    print(f"[PPO-{effective_recurrent_type.upper()}] Step dt = {step_dt:.4f}s, max_episode_length = {base_env.max_episode_length}")
 
     play_step = 0
     while total_episodes < args_cli.num_episodes and simulation_app.is_running():
@@ -562,7 +577,7 @@ def run_sac_eval() -> None:
             registry_agent_cfg = load_cfg_from_registry(args_cli.task, "rl_games_sac_cfg_entry_point")
         except ValueError as exc:
             raise ValueError(
-                f"{exc}\nFor this repository's RL-Games SAC setup, use the local task id "
+                f"{exc}\nFor this repository's RL-Games SAC setup, use the refactored task id "
                 "'Isaac-Factory-PegInsert-Local-Direct-v0' or pass an explicit RL-Games checkpoint."
             ) from exc
 
@@ -585,7 +600,7 @@ def run_sac_eval() -> None:
             except ValueError as exc:
                 raise ValueError(
                     f"{exc}\nCould not recover RL-Games SAC config from checkpoint metadata either. "
-                    "Pass a checkpoint produced by this repository or use the local task id."
+                    "Pass a checkpoint produced by this repository or use the refactored task id."
                 ) from exc
         agent_cfg = registry_agent_cfg
     upgrade_factory_sac_agent_cfg(agent_cfg)
@@ -684,19 +699,123 @@ def run_sac_eval() -> None:
     env.close()
 
 
+def run_skrl_eval(algorithm: str) -> None:
+    try:
+        from skrl.utils.runner.torch import Runner
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError("skrl is not installed in this environment.") from exc
+
+    from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
+    from isaaclab_rl.skrl import SkrlVecEnvWrapper
+
+    from isaaclab_factory_tasks.utils import load_cfg_from_registry
+
+    if args_cli.checkpoint is None:
+        raise ValueError("--checkpoint PATH is required for --eval_mode skrl")
+    resume_path = os.path.abspath(args_cli.checkpoint)
+
+    algo_lower = algorithm.lower()
+    algo_upper = algorithm.upper()
+    agent_cfg = load_cfg_from_registry(args_cli.task, f"skrl_{algo_lower}_cfg_entry_point")
+    agent_cfg["trainer"]["close_environment_at_exit"] = False
+
+    env_cfg = PegInsertEnvCfg()
+    env_cfg.scene.num_envs = args_cli.num_envs
+    if args_cli.device is not None:
+        env_cfg.sim.device = args_cli.device
+    if args_cli.seed is not None:
+        env_cfg.seed = args_cli.seed
+
+    env = gym.make(args_cli.task, cfg=env_cfg)
+    if isinstance(env.unwrapped, DirectMARLEnv):
+        env = multi_agent_to_single_agent(env)
+    base_env = env.unwrapped
+    step_dt = _get_step_dt(base_env)
+
+    env = SkrlVecEnvWrapper(env, ml_framework="torch")
+
+    runner = Runner(env, agent_cfg)
+    print(env.observation_space)
+    print(env.state_space)
+    print(runner.agent.policy.net_container[0].in_features)
+    runner.agent.load(resume_path)
+    _patch_skrl_unbounded_action_bounds(runner.agent)
+    _set_skrl_agent_eval_mode(runner.agent)
+
+    print(f"[SKRL-{algo_upper}] Loading checkpoint: {resume_path}")
+    print(f"[SKRL-{algo_upper}] Running {args_cli.num_episodes} episodes...")
+    print(f"[SKRL-{algo_upper}] Step dt = {step_dt:.4f}s, max_episode_length = {base_env.max_episode_length}")
+
+    obs, _ = env.reset()
+
+    total_episodes = 0
+    total_successes = 0
+    total_steps_list: list[int] = []
+    total_time_list: list[float] = []
+
+    device = base_env.device
+    episode_steps = torch.zeros(base_env.num_envs, dtype=torch.long, device=device)
+    episode_success = torch.zeros(base_env.num_envs, dtype=torch.bool, device=device)
+    success_step = torch.zeros(base_env.num_envs, dtype=torch.long, device=device)
+
+    label = f"skrl_{algo_lower}"
+    play_step = 0
+    # Bypass skrl's random_timesteps warmup by passing a large timestep.
+    eval_timestep = 10**9
+    while total_episodes < args_cli.num_episodes and simulation_app.is_running():
+        play_step += 1
+        episode_steps += 1
+
+        with torch.inference_mode():
+            states = _get_skrl_states(env, obs)
+            act_out = runner.agent.act(obs, states, timestep=eval_timestep, timesteps=eval_timestep)
+            actions = act_out[0]
+            # Gaussian policies (SAC) expose the deterministic mean via outputs dict.
+            if not args_cli.stochastic_policy and isinstance(act_out, tuple) and len(act_out) >= 2:
+                outs = act_out[-1]
+                if isinstance(outs, dict) and "mean_actions" in outs:
+                    actions = outs["mean_actions"]
+            actions = torch.clamp(actions, -1.0, 1.0)
+            obs, _, terminated, truncated, _ = env.step(actions)
+            dones = (terminated | truncated).view(-1)
+
+        curr_successes = base_env._get_curr_successes(base_env.task_cfg.success_threshold)
+        first_success = curr_successes & ~episode_success
+        success_step[first_success] = episode_steps[first_success]
+        episode_success |= curr_successes
+
+        done_envs = dones.nonzero(as_tuple=False).squeeze(-1)
+        if done_envs.numel() > 0:
+            for env_id in done_envs.tolist():
+                total_episodes += 1
+                if episode_success[env_id]:
+                    total_successes += 1
+                    steps = int(success_step[env_id].item())
+                    total_steps_list.append(steps)
+                    total_time_list.append(steps * step_dt)
+                if total_episodes >= args_cli.num_episodes:
+                    break
+
+            episode_steps[done_envs] = 0
+            episode_success[done_envs] = False
+            success_step[done_envs] = 0
+
+        if play_step % 100 == 0:
+            _print_progress(play_step, total_episodes, total_successes, label)
+
+    _print_summary(f"SKRL-{algo_upper} Evaluation", total_episodes, total_successes, total_steps_list, total_time_list)
+    env.close()
+
+
 if __name__ == "__main__":
     if args_cli.eval_mode == "scripted":
         run_scripted_baseline()
     elif args_cli.eval_mode == "ppo_lstm":
         run_ppo_eval("lstm")
-    elif args_cli.eval_mode == "ppo_mlp":
-        run_ppo_eval("mlp")
-    elif args_cli.eval_mode == "ppo_transformer":
-        run_ppo_eval("transformer")
-    elif args_cli.eval_mode == "ppo_transformer_gru":
-        run_ppo_eval("transformer_gru")
     elif args_cli.eval_mode == "sac":
         run_sac_eval()
+    elif args_cli.eval_mode == "skrl":
+        run_skrl_eval(args_cli.algorithm)
     else:
         run_ppo_eval("gru")
     simulation_app.close()

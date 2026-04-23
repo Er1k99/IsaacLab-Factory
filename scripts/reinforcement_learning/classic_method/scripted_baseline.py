@@ -1,7 +1,19 @@
 """Scripted IK Baseline for PegInsert task."""
 
 import argparse
+import sys
+from pathlib import Path
+
 import torch
+
+for parent in Path(__file__).resolve().parents:
+    source_root = parent / "source"
+    if (source_root / "isaaclab_factory_tasks").is_dir():
+        source_root_str = str(source_root)
+        if source_root_str not in sys.path:
+            sys.path.insert(0, source_root_str)
+        break
+
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser()
@@ -21,7 +33,7 @@ from isaaclab_factory_tasks.direct.peg_insert.env_cfg import PegInsertEnvCfg
 def run_baseline():
     env_cfg = PegInsertEnvCfg()
     env_cfg.scene.num_envs = args_cli.num_envs
-    env = gym.make("Isaac-Factory-PegInsert-Refactored-Direct-v0", cfg=env_cfg)
+    env = gym.make("Isaac-Factory-PegInsert-Local-Direct-v0", cfg=env_cfg)
 
     u = env.unwrapped
     device = u.device

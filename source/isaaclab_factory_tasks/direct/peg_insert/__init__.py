@@ -23,5 +23,6 @@ gym.register(
         "rl_games_ppo_transformer_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_transformer_cfg.yaml",
         "rl_games_ppo_transformer_gru_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_transformer_gru_cfg.yaml",
         "rl_games_sac_cfg_entry_point": f"{agents.__name__}:rl_games_sac_cfg.yaml",
+        "skrl_td3_cfg_entry_point": f"{agents.__name__}:skrl_td3_cfg.yaml",
     },
 )

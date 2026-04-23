@@ -1,0 +1,24 @@
+# Python dependencies for IsaacLab-Factory.
+#
+# Recommended install command:
+#   $ISAACLAB_ROOT/isaaclab.sh -p -m pip install -r requirements.txt
+#
+# External runtime dependencies, install/provide via IsaacLab instead of this file:
+#   Isaac Sim == 5.1.0.0
+#   Isaac Lab == 0.54.2
+#   isaaclab == 0.54.2
+#   isaaclab-rl == 0.4.7
+#   isaaclab-assets == 0.2.4
+
+torch==2.7.0
+numpy==1.26.0
+gymnasium==1.2.1
+gym==0.23.1
+hydra-core==1.3.2
+PyYAML==6.0.2
+prettytable==3.3.0
+rl-games==1.6.1
+skrl==2.0.0
+tensorboard==2.20.0
+wandb==0.25.1
+packaging==23.0

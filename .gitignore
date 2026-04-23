@@ -12,3 +12,9 @@ videos/
 run/
 runs/
 /best_model/
+
+# checkpoints and logs
+best_model/
+*.pth
+*.pt
+*.tfevents*
