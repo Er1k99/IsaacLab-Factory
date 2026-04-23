@@ -3,21 +3,33 @@
 # Recommended install command:
 #   $ISAACLAB_ROOT/isaaclab.sh -p -m pip install -r requirements.txt
 #
+# Isaac Sim Python packages are resolved from NVIDIA's package index:
+--extra-index-url https://pypi.nvidia.com
+#
 # External runtime dependencies, install/provide via IsaacLab instead of this file:
-#   Isaac Sim == 5.1.0.0
 #   Isaac Lab == 0.54.2
 #   isaaclab == 0.54.2
 #   isaaclab-rl == 0.4.7
 #   isaaclab-assets == 0.2.4
 
+# Additional Python packages required by the local IsaacLab source tree at runtime:
+#   flatdict -> isaaclab.sim.simulation_context
+#   h5py     -> isaaclab.utils.datasets / isaaclab_rl
+#   rl-games -> IsaacLab-compatible RL-Games fork for Python 3.11
+
+isaacsim[all,extscache]==5.1.0.0
+flatdict==4.0.1
+h5py
 torch==2.7.0
 numpy==1.26.0
 gymnasium==1.2.1
 gym==0.23.1
 hydra-core==1.3.2
+protobuf>=4.25.8,!=5.26.0
 PyYAML==6.0.2
 prettytable==3.3.0
-rl-games==1.6.1
+toml==0.10.2
+rl-games @ git+https://github.com/isaac-sim/rl_games.git@python3.11
 skrl==2.0.0
 tensorboard==2.20.0
 wandb==0.25.1

@@ -2,7 +2,7 @@
 
 This document describes the three conventional (non-learning) baselines implemented for the `Isaac-Factory-PegInsert-Local-Direct-v0` task, used to compare against the trained RL policies.
 
-All baseline scripts are located in `scripts/reinforcement_learning/`.
+All baseline scripts are located in `scripts/reinforcement_learning/classic_method/`.
 
 ---
 
@@ -158,19 +158,19 @@ cd ~/IsaacLab-Factory
 
 **Scripted IK:**
 ```bash
-python scripts/reinforcement_learning/scripted_baseline.py \
+python scripts/reinforcement_learning/classic_method/scripted_baseline.py \
   --num_envs 32 --num_episodes 1000
 ```
 
 **RRT (no collision avoidance):**
 ```bash
-python scripts/reinforcement_learning/rrt_baseline.py \
+python scripts/reinforcement_learning/classic_method/rrt_baseline.py \
   --num_envs 32 --num_episodes 1000
 ```
 
 **RRT with collision avoidance:**
 ```bash
-python scripts/reinforcement_learning/rrt2_baseline.py \
+python scripts/reinforcement_learning/classic_method/rrt2_baseline.py \
   --num_envs 32 --num_episodes 1000
 ```
 
@@ -190,9 +190,9 @@ To watch the robot execute a baseline policy in the Isaac Sim GUI, set `--num_en
 ```bash
 # Example: visualise Scripted IK for 5 episodes
 sed -i 's/args_cli.headless = True/args_cli.headless = False/' \
-  scripts/reinforcement_learning/scripted_baseline.py
+  scripts/reinforcement_learning/classic_method/scripted_baseline.py
 
-python scripts/reinforcement_learning/scripted_baseline.py \
+python scripts/reinforcement_learning/classic_method/scripted_baseline.py \
   --num_envs 1 --num_episodes 5
 ```
 
@@ -207,7 +207,7 @@ Start recording in Kazam before launching the script, then stop once the episode
 
 ```bash
 sed -i 's/args_cli.headless = False/args_cli.headless = True/' \
-  scripts/reinforcement_learning/scripted_baseline.py
+  scripts/reinforcement_learning/classic_method/scripted_baseline.py
 ```
 
 The same steps apply for `rrt_baseline.py` and `rrt2_baseline.py`.
@@ -244,7 +244,7 @@ The same steps apply for `rrt_baseline.py` and `rrt2_baseline.py`.
 ## File Structure
 
 ```
-scripts/reinforcement_learning/
+scripts/reinforcement_learning/classic_method/
 ├── scripted_baseline.py     # Phase 0: direct IK; Phase 1: descent
 ├── rrt_baseline.py          # Phase 0: Cartesian RRT; Phase 1: descent
 ├── rrt2_baseline.py         # Phase 0: Cartesian RRT + AABB check; Phase 1: descent

@@ -7,13 +7,20 @@ name = "isaaclab-factory-tasks"
 version = "0.1.0"
 description = "Refactored standalone IsaacLab Factory PegInsert direct task."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.12"
 dependencies = [
+    "flatdict==4.0.1",
+    "gym==0.23.1",
     "gymnasium",
+    "h5py",
     "hydra-core",
+    "isaacsim[all,extscache]==5.1.0.0",
     "numpy<2",
     "prettytable",
+    "protobuf>=4.25.8,!=5.26.0",
     "PyYAML",
+    "rl-games @ git+https://github.com/isaac-sim/rl_games.git@python3.11",
+    "toml",
     "torch>=2.7",
 ]
 

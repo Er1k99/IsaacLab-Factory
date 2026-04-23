@@ -97,7 +97,7 @@ IsaacLab-Factory/
 | Hydra Core | `1.3.2` | Required |
 | NumPy | `1.26.0` | Required; `pyproject.toml` requires `numpy<2` |
 | PyYAML | `6.0.2` | Required |
-| rl-games | `1.6.1` | Required for RL-Games training/playback/evaluation |
+| rl-games | `isaac-sim/rl_games@python3.11` | Required IsaacLab-compatible RL-Games fork for training/playback/evaluation |
 | prettytable | `3.3.0` | Environment list output |
 | TensorBoard | `2.20.0` | Training-curve visualization |
 | Weights & Biases | `0.25.1` | Optional; used when `--track` is enabled |
@@ -106,7 +106,7 @@ IsaacLab-Factory/
 - Minimum dependency constraints declared by this repository are in `pyproject.toml`:
 
 ```text
-python >= 3.10
+python >= 3.11,<3.12
 torch >= 2.7
 numpy < 2
 ```
@@ -227,23 +227,13 @@ $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/play.py \
   --num_envs 32
 ```
 
-- Load the latest checkpoint:
-
-```bash
-$ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/play.py \
-  --task Isaac-Factory-PegInsert-Local-Direct-v0 \
-  --algorithm PPO_GRU \
-  --use_last_checkpoint \
-  --num_envs 32
-```
-
 - Load a specified checkpoint:
 
 ```bash
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/play.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
   --algorithm PPO_TRANSFORMER_GRU \
-  --checkpoint best_model/FactoryPegInsertTransformerGRU/nn/FactoryPegInsertTransformerGRU.pth \
+  --checkpoint best_model/TransformerGRU/FactoryPegInsertTransformerGRU.pth \
   --num_envs 32
 ```
 
@@ -265,7 +255,7 @@ $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/eval.py \
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/eval.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
   --eval_mode ppo_transformer_gru \
-  --checkpoint best_model/FactoryPegInsertTransformerGRU/nn/FactoryPegInsertTransformerGRU.pth \
+  --checkpoint best_model/TransformerGRU/FactoryPegInsertTransformerGRU.pth \
   --num_envs 256 \
   --num_episodes 1000
 ```
@@ -276,7 +266,7 @@ $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/eval.py \
 $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/rl_games/eval.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
   --eval_mode sac \
-  --checkpoint best_model/FactoryPegInsertSAC/nn/FactoryPegInsertSAC.pth \
+  --checkpoint best_model/SAC/FactoryPegInsertSAC.pth \
   --num_envs 256 \
   --num_episodes 1000
 ```
@@ -288,7 +278,7 @@ $ISAACLAB_ROOT/isaaclab.sh -p scripts/reinforcement_learning/skrl/eval_td3.py \
   --task Isaac-Factory-PegInsert-Local-Direct-v0 \
   --eval_mode skrl \
   --algorithm TD3 \
-  --checkpoint logs/skrl/FactoryPegInsertTD3/<RunDir>/checkpoints/best_agent.pt \
+  --checkpoint best_model/TD3/td3_peginsert_best.pt \
   --num_envs 256 \
   --num_episodes 1000
 ```
